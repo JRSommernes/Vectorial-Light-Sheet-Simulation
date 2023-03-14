@@ -71,6 +71,8 @@ def multidot(arr):
 
     """
     num,res,a,b,c = arr.shape
+    if num == 1:
+        return arr.reshape(res,a,b,c)
     out = np.zeros_like(arr[0])
     for i in range(res):
         for j in range(res):
@@ -214,7 +216,7 @@ def poisson_noise(image,SNR):
 
     return noisy
 
-def add_noise(image,photon_count,cam_offset=100,cam_sigma=2):
+def add_noise(image,photon_count,cam_offset,cam_sigma):
     """Function to add noise to a N-D stack
 
     Parameters
@@ -230,11 +232,11 @@ def add_noise(image,photon_count,cam_offset=100,cam_sigma=2):
         Noisy array
 
     """
-    poisson = poisson_noise(image,np.sqrt(photon_count))
+    poisson = poisson_noise(image,np.sqrt(photon_count)).astype(np.uint16)
     gaussian_background = np.random.normal(cam_offset, cam_sigma, image.shape)
     image = (poisson+gaussian_background).astype(np.uint16)
 
-    return image, poisson, gaussian_background
+    return image, poisson
 
 def calculate_histogram(stack):
     """Calculates and returns the histogram of a N-D array

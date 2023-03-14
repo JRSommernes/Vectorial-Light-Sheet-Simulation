@@ -1,6 +1,8 @@
 from scipy.optimize import curve_fit
 from other_functions import *
 import numpy as np
+import tifffile
+import os
 
 class Lens:
     """Class containing lens parameters
@@ -27,6 +29,7 @@ class Lens:
         self.RI = RI    #Refractive index
         self.rot = rot  #Rotation of lens
 
+
 class Camera:
     """Class containin camera parameters
 
@@ -44,9 +47,12 @@ class Camera:
 
     """
 
-    def __init__(self,res,vox):
+    def __init__(self,res,vox,offset,RMS):
         self.res = res #Field of view [pixels]
         self.vox = vox #Voxel size [m]
+        self.offset = offset
+        self.RMS = RMS
+
 
 class Microscope:
     """Class containing all simulation functions
@@ -68,11 +74,12 @@ class Microscope:
     lam_em
 
     """
-    def __init__(self,lam_ex,lam_em):
+    def __init__(self,lam_ex,lam_em,path):
         self.lenses = []              #List of all lenses in system
         self.lam_ex = lam_ex          #Excitation wavelength [m]
         self.lam_em = lam_em          #Emission wavelength [m]
         self.k0 = 2*np.pi/self.lam_em #Emission wavenumber [rad/m]
+        self.path = path              #Save folder location
 
     def add_lens(self,NA,RI=1,rot=0,pos=False):
         """Adds lens to the system
@@ -99,7 +106,7 @@ class Microscope:
         else:
             self.lenses.insert(pos,lens)
 
-    def add_camera(self,res,vox):
+    def add_camera(self,res,vox,offset,RMS):
         """Updates the camera of the system
 
         Parameters
@@ -113,7 +120,7 @@ class Microscope:
         if not type(res) is int:
             raise TypeError('Pixel count can only be integer')
         else:
-            self.camera = Camera(res,vox)
+            self.camera = Camera(res,vox,offset,RMS)
 
     def calculate_system_specs(self):
         """Calculates the system specifications
@@ -135,13 +142,12 @@ class Microscope:
         """
         #Calculates system magnification and light-sheet rotation
         self.mag = 1
-        self.alpha = np.pi/2
+        self.alpha = np.pi/2-np.sum([lens.rot for lens in self.lenses])
         for i,lens in enumerate(self.lenses):
             if i % 2 == 0:
                 self.mag *= lens.NA
             else:
                 self.mag /= lens.NA
-            self.alpha -= lens.rot
         self.axial_mag = self.mag**2*self.lenses[-1].RI/self.lenses[0].RI
         self.z_voxel_size = self.camera.vox/self.mag*self.axial_mag
         self.scaling = self.lam_em/(2*self.camera.vox*self.lenses[-1].NA)
@@ -239,13 +245,11 @@ class Microscope:
 
         #Calculates the wavenumber proportiones by the NA of the last lens
         del_K = self.k0*lenses[0].NA/M
-        k_xy = del_K*RR
-        k_z = np.sqrt((self.k0*lenses[0].RI)**2 - k_xy**2)
 
         #Iterates through the lenses and append the coordinate transform
         #of the lens to a list
         modes = ['collimating','focusing']
-        apodization = np.ones((self.camera.res,self.camera.res)) #Not yet implemented
+        apodization = np.ones((self.camera.res,self.camera.res))
         for i,lens in enumerate(lenses):
             #Determines if the lens is focusing or collimating
             mode = modes[(i+1)%2]
@@ -258,7 +262,7 @@ class Microscope:
                 lens.phi = np.arctan2(yy,xx)
                 jones_mat = [np.linalg.inv(R_z(lens.phi))]
                 jones_mat.append(L_refraction(dir*lens.theta))
-                apodization /= np.sqrt(lens.RI*np.cos(lens.theta))
+                apodization *= np.sqrt(lens.RI*np.cos(lens.theta))
 
             elif mode == 'collimating':
                 #If the lens is collimating, a lens transformation is added to
@@ -266,7 +270,7 @@ class Microscope:
                 lens.theta = np.arcsin(lens.NA*tmp_lens.RI*np.sin(tmp_lens.theta)/(lens.RI*tmp_lens.NA))
                 lens.phi = tmp_lens.phi
                 jones_mat.append(L_refraction(dir*lens.theta))
-                apodization *= np.sqrt(lens.RI*np.cos(lens.theta))
+                apodization /= np.sqrt(lens.RI*np.cos(lens.theta))
 
             elif mode == 'focusing':
                 #If the lens is focusing, there are three cases:
@@ -286,7 +290,7 @@ class Microscope:
                 #In all cases, there can be a refractive index change between
                 #the two lenses.
                 if not lens.rot == 0: #Case 1)
-                    Rx = R_x(-tmp_lens.rot)
+                    Rx = R_x(-lens.rot)
                     ki = np.array((np.sin(tmp_lens.theta)*np.cos(tmp_lens.phi),
                                    np.sin(tmp_lens.theta)*np.sin(tmp_lens.phi),
                                    np.cos(tmp_lens.theta)))
@@ -296,7 +300,7 @@ class Microscope:
                     theta[kf[2]<0] = np.NaN
 
                     jones_mat.append(R_z(tmp_lens.phi))
-                    Rx_mat = np.broadcast_to(R_x(tmp_lens.rot),(self.camera.res,self.camera.res,3,3))
+                    Rx_mat = np.broadcast_to(R_x(lens.rot),(self.camera.res,self.camera.res,3,3))
                     jones_mat.append(Rx_mat)
                     jones_mat.append(np.linalg.inv(R_z(phi)))
 
@@ -337,7 +341,7 @@ class Microscope:
                     jones_mat.append(R_y(dir*lens.theta))
                     jones_mat.append(L_refraction(dir*lens.theta))
 
-                apodization /= np.sqrt(lens.RI*np.cos(lens.theta))
+                apodization *= np.sqrt(lens.RI*np.cos(lens.theta))
 
             #The lens that was iterated through is added as a temporary lens
             #to be available during the next iteration
@@ -352,17 +356,67 @@ class Microscope:
         jones_mat.append(R_z(lenses[-1].phi))
         self.jones_mat = np.array(jones_mat)
         self.transform = multidot(self.jones_mat)
-        self.apodization = apodization
+        self.apodization = apodization            
+
+    def make_MTF(self):
+        """Calculates the MTF of the system using a Fourier transform.
+
+        """
+        #Zero pads the effective PSF to the desired OTF resolution to get the
+        #desired base frequency
+        padding = (self.OTF_res-self.camera.res)//2
+        product = np.pad(self.eff_PSF,padding)
+
+        #Adds noise to the PSF
+        if self.SNR != 0: #zero SNR is defined as no noise
+            product, poisson = add_noise(product,self.SNR**2,self.camera.offset,self.camera.RMS)
+
+        #Snips out the effective PSF with noise to save
+        self.PSF_poisson = poisson[padding:padding+self.camera.res,
+                                   padding:padding+self.camera.res,
+                                   padding:padding+self.camera.res]
+        self.PSF_readout = product[padding:padding+self.camera.res,
+                                   padding:padding+self.camera.res,
+                                   padding:padding+self.camera.res]
+
+        #Fourier transform the effective PSF to get the MTF
+        OTF_noiseless = np.fft.fftshift(np.fft.fftn(np.fft.fftshift(product)))
+        OTF_poisson = np.fft.fftshift(np.fft.fftn(np.fft.fftshift(poisson)))
+        OTF_readout = np.fft.fftshift(np.fft.fftn(np.fft.fftshift(product)))
+        self.MTF_noiseless = np.abs(OTF_noiseless)
+        self.MTF_poisson = np.abs(OTF_poisson)
+        self.MTF_readout = np.abs(OTF_readout)
+
+        #Calculates the base frequency of the MTF
+        self.base_freq = 1/(len(self.MTF_readout)*(self.camera.vox/(self.mag)))
+
+    def save_stacks(self):
+        if not os.path.exists(self.path):
+            os.mkdir(self.path)
+        with tifffile.TiffWriter(self.path+'/PSF.tiff') as stack:
+            stack.save(img16(self.PSF).transpose(2,1,0),contiguous=True)
+        with tifffile.TiffWriter(self.path+'/PSF_effective.tiff') as stack:
+            stack.save(img16(self.eff_PSF).transpose(2,1,0),contiguous=True)
+        with tifffile.TiffWriter(self.path+'/PSF_poisson.tiff') as stack:
+            stack.save(self.PSF_poisson.transpose(2,1,0),contiguous=True)
+        with tifffile.TiffWriter(self.path+'/PSF_readout.tiff') as stack:
+            stack.save(self.PSF_readout.transpose(2,1,0),contiguous=True)
+        with tifffile.TiffWriter(self.path+'/MTF_noiseless.tiff') as stack:
+            stack.save(self.MTF_noiseless.transpose(2,1,0),contiguous=True)
+        with tifffile.TiffWriter(self.path+'/MTF_poisson.tiff') as stack:
+            stack.save(self.MTF_poisson.transpose(2,1,0),contiguous=True)
+        with tifffile.TiffWriter(self.path+'/MTF_readout.tiff') as stack:
+            stack.save(self.MTF_readout.transpose(2,1,0),contiguous=True)
 
     def analyze(self):
             """Automated analysis script used to extract resolution from the MTF.
 
             """
             #Define the half length of the MTF
-            N = len(system.MTF_poisson)//2
+            N = len(self.MTF_poisson)//2
             #Subtracts the square root of the DC term from the poisson MTF
             #to fond the noise floor of the Fourier transform
-            poisson = system.MTF_poisson-np.sqrt(system.MTF_poisson.max())
+            poisson = self.MTF_poisson-np.sqrt(self.MTF_poisson.max())
 
             xx = poisson[N,N:,N]
             X_cut = np.where(xx<=0)[0][0]
@@ -378,36 +432,11 @@ class Microscope:
 
             self.XYZ_res = np.array([X_res,Y_res,Z_res])
 
-            # gaussian = np.random.normal(100, 2, system.MTF_readout.shape)
-            # gauss_MTF = np.fft.fftshift(np.fft.fftn(np.fft.fftshift(gaussian)))
-            # readout = system.MTF_readout - np.abs(gauss_MTF)
-            #
-            import matplotlib.pyplot as plt
-            fig,ax = plt.subplots(1,2)
-            ax[0].plot(system.MTF_readout[N,:,N])
-            ax[1].plot(np.log(system.MTF_readout[N,:,N]))
-            plt.show()
-
-            # fig,ax = plt.subplots(2,2)
-            # ax[0,0].imshow(system.MTF_readout[:,:,N])
-            # ax[0,1].imshow(np.log(system.MTF_readout[:,:,N]))
-            # ax[1,0].imshow(readout[:,:,N])
-            # ax[1,1].imshow(np.log(readout[:,:,N]))
-            # plt.tight_layout()
-            # plt.show()
-
-
-
     def FWHM_measurement(self):
         """Script to find the FWHM of the PSF
 
         """
         PSF = self.PSF_readout - self.PSF_readout.min()
-
-        #Define the orthoplanes of the PSF
-        XY = PSF[:,:,self.camera.res//2]
-        YZ = PSF[:,self.camera.res//2,:]
-        XZ = PSF[self.camera.res//2,:,:]
 
         #Define the axis lines of the PSF
         xx = PSF[self.camera.res//2,:,self.camera.res//2]
@@ -417,49 +446,17 @@ class Microscope:
         guess = np.array((xx.max(), 0, self.camera.vox/self.mag))
 
         x = np.linspace(-self.FoV/2,self.FoV/2,self.camera.res)
-        x_fit, cov = curve_fit(gaussian, x, xx, p0=guess)
-        y_fit, cov = curve_fit(gaussian, x, yy, p0=guess)
-        z_fit, cov = curve_fit(gaussian, x, zz, p0=guess)
+        x_fit, _ = curve_fit(gaussian, x, xx, p0=guess)
+        y_fit, _ = curve_fit(gaussian, x, yy, p0=guess)
+        z_fit, _ = curve_fit(gaussian, x, zz, p0=guess)
 
         _, _, x_sigma = x_fit
         _, _, y_sigma = y_fit
         _, _, z_sigma = z_fit
 
-        self.FWHM = np.array((x_sigma,y_sigma,z_sigma))*2.355
+        self.FWHM = np.array((x_sigma,y_sigma,z_sigma))*2.355*1e9
 
-    def make_MTF(self):
-        """Calculates the MTF of the system using a Fourier transform.
-
-        """
-        #Zero pads the effective PSF to the desired OTF resolution to get the
-        #desired base frequency
-        padding = (self.OTF_res-self.camera.res)//2
-        product = np.pad(self.eff_PSF,padding)
-
-        #Adds noise to the PSF
-        if self.SNR != 0: #zero SNR is defined as no noise
-            product, poisson, background = add_noise(product,self.SNR**2)
-
-        #Snips out the effective PSF with noise to save
-        self.PSF_poisson = poisson[padding:padding+self.camera.res,
-                                   padding:padding+self.camera.res,
-                                   padding:padding+self.camera.res]
-        self.PSF_readout = product[padding:padding+self.camera.res,
-                                   padding:padding+self.camera.res,
-                                   padding:padding+self.camera.res]
-
-        #Fourier transform the effective PSF to get the MTF
-        OTF_poisson = np.fft.fftshift(np.fft.fftn(np.fft.fftshift(poisson)))
-        OTF_readout = np.fft.fftshift(np.fft.fftn(np.fft.fftshift(product)))
-        OTF_background = np.fft.fftshift(np.fft.fftn(np.fft.fftshift(background)))
-        self.MTF_poisson = np.abs(OTF_poisson)
-        self.MTF_readout = np.abs(OTF_readout)
-        self.MTF_background = np.abs(OTF_background)
-
-        #Calculates the base frequency of the MTF
-        self.base_freq = 1/(len(self.MTF_readout)*(self.camera.vox/(self.mag)))
-
-    def calculate_PSF(self,GUI=None,MTF=True):
+    def calculate_PSF(self,GUI=None):
         """Main function that creates the system PSF and MTF
 
         Parameters
@@ -493,7 +490,7 @@ class Microscope:
         bao = np.nan_to_num(1 / np.cos(self.lenses[-1].theta))
 
         #Generates a dipole ensamble using a Fibonacci lattice
-        phi,theta = make_pol(self.timepoints)
+        phi,theta = make_pol(self.ensamble)
 
         #Calculates average light-sheet polarization in image space
         l_p = np.array(((np.cos(self.alpha), 0, -np.sin(self.alpha)),
@@ -549,10 +546,11 @@ class Microscope:
         self.tti = np.mean(throughput)
 
         #Calculates the MTF and analyzes is
-        if MTF == True:
-            self.make_MTF()
-            self.analyze()
+        self.make_MTF()
+        self.save_stacks()
+        self.analyze()
         self.FWHM_measurement()
+
 
 ################################################################################
 #Example code for simulation without using GUI
@@ -576,7 +574,8 @@ def add_lenses(system):
 
     NA_4 = 0.95
     RI_4 = 1
-    system.add_lens(NA_4,RI_4)
+    rot_4 = 0
+    system.add_lens(NA_4,RI_4,rot=rot_4)
 
     NA_3 = NA_2*(RI_1*NA_4)/(RI_4*NA_1)
     RI_3 = 1
@@ -601,11 +600,11 @@ def make_system(system):
 
     """
     add_lenses(system) #Adds lenses to the system
-    system.add_camera(128,2e-6) #Defines camera config
+    system.add_camera(128,2e-6,100,1.4) #Defines camera config
 
-    system.timepoints = 10 #Number of dipoles in ensamble
+    system.ensamble = 10 #Number of dipoles in ensamble
     system.OTF_res = 256 #Size of OTF in pixels
-    system.ls_pol = 'p' #Ls polarization ['p', 's', or 'u']
+    system.ls_pol = 'u' #Ls polarization ['p', 's', or 'u']
     system.anisotropy = 0.4 #Anisotropy [0, or 0.4]
     system.ls_opening = 5*np.pi/180 #Ls opening half-angle in degrees
     system.SNR = 20 #Signal to noise ratio
@@ -617,7 +616,8 @@ def make_system(system):
 if __name__ == '__main__':
     ex = 488e-9 #Excitation wavelength
     em = 507e-9 #Emission wavelength
-    system = Microscope(ex,em) #Creates microscope
+    path = 'test3'
+    system = Microscope(ex,em,path) #Creates microscope
     make_system(system) #Determines the rest of the system configuration
     system.calculate_PSF() #Calculates the PSF of the system
 
@@ -638,10 +638,10 @@ if __name__ == '__main__':
     # ax[2,1].imshow(np.log(system.MTF_readout[:,:,system.OTF_res//2]-system.MTF_background[:,:,system.OTF_res//2]))
     # plt.show()
 
-    import os
+    
     import json
-    import tifffile
-    path = 'test'
+    
+    path = 'test2'
     if not os.path.exists(path):
         os.mkdir(path)
 
@@ -654,7 +654,7 @@ if __name__ == '__main__':
     with tifffile.TiffWriter(path+'/MTF_readout.tiff') as stack:
         stack.save(system.MTF_readout.transpose(2,1,0),contiguous=True)
 
-    metadata = {'Dipoles in ensamble' : system.timepoints,
+    metadata = {'Dipoles in ensamble' : system.ensamble,
                 'Emission wavelength [nm]' : np.round(system.lam_em*1e9,2),
                 'Excitation wavelength [nm]' : np.round(system.lam_ex*1e9,2),
                 'Full FoV [pixels]' : system.camera.res,

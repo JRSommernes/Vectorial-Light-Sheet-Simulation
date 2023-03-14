@@ -217,24 +217,48 @@ class Ui_MainWindow(object):
         self.Helpvoxel.setGeometry(QtCore.QRect(160, 32, 50, 20))
         self.Helpvoxel.setObjectName("Helpvoxel")
 
+        self.RMS_lab = QtWidgets.QLabel(self.tab_2)
+        self.RMS_lab.setGeometry(QtCore.QRect(10, 54, 85, 20))
+        self.RMS_lab.setObjectName("RMS_lab")
+
+        self.RMS_lineEdit = QtWidgets.QLineEdit(self.tab_2)
+        self.RMS_lineEdit.setGeometry(QtCore.QRect(100, 54, 50, 20))
+        self.RMS_lineEdit.setObjectName("RMS_lineEdit")
+
+        self.HelpRMS = QtWidgets.QPushButton(self.tab_2)
+        self.HelpRMS.setGeometry(QtCore.QRect(160, 54, 50, 20))
+        self.HelpRMS.setObjectName("HelpRMS")
+
+        self.offset_lab = QtWidgets.QLabel(self.tab_2)
+        self.offset_lab.setGeometry(QtCore.QRect(10, 76, 85, 20))
+        self.offset_lab.setObjectName("offset_lab")
+
+        self.offset_lineEdit = QtWidgets.QLineEdit(self.tab_2)
+        self.offset_lineEdit.setGeometry(QtCore.QRect(100, 76, 50, 20))
+        self.offset_lineEdit.setObjectName("offset_lineEdit")
+
+        self.Helpoffset = QtWidgets.QPushButton(self.tab_2)
+        self.Helpoffset.setGeometry(QtCore.QRect(160, 76, 50, 20))
+        self.Helpoffset.setObjectName("Helpoffset")
+
         self.OTF_size_lab = QtWidgets.QLabel(self.tab_2)
-        self.OTF_size_lab.setGeometry(QtCore.QRect(10, 54, 85, 20))
+        self.OTF_size_lab.setGeometry(QtCore.QRect(310, 10, 85, 20))
         self.OTF_size_lab.setObjectName("OTF_size_lab")
 
         self.OTF_size_lineEdit = QtWidgets.QLineEdit(self.tab_2)
-        self.OTF_size_lineEdit.setGeometry(QtCore.QRect(100, 54, 50, 20))
+        self.OTF_size_lineEdit.setGeometry(QtCore.QRect(380, 10, 50, 20))
         self.OTF_size_lineEdit.setObjectName("OTF_size_lineEdit")
 
         self.HelpOTF = QtWidgets.QPushButton(self.tab_2)
-        self.HelpOTF.setGeometry(QtCore.QRect(160, 54, 50, 20))
+        self.HelpOTF.setGeometry(QtCore.QRect(440, 10, 50, 20))
         self.HelpOTF.setObjectName("HelpOTF")
 
         self.FoV_lab = QtWidgets.QLabel(self.tab_2)
-        self.FoV_lab.setGeometry(QtCore.QRect(10, 76, 85, 20))
+        self.FoV_lab.setGeometry(QtCore.QRect(310, 32, 85, 20))
         self.FoV_lab.setObjectName("FoV_lab")
 
         self.FoV_lab_2 = QtWidgets.QLabel(self.tab_2)
-        self.FoV_lab_2.setGeometry(QtCore.QRect(100, 76, 100, 20))
+        self.FoV_lab_2.setGeometry(QtCore.QRect(400, 32, 100, 20))
         self.FoV_lab_2.setObjectName("FoV_lab_2")
 
         self.AddCamera = QtWidgets.QPushButton(self.tab_2)
@@ -300,17 +324,17 @@ class Ui_MainWindow(object):
         self.tab_4 = QtWidgets.QWidget()
         self.tab_4.setObjectName("tab_4")
 
-        self.timepoints_lab = QtWidgets.QLabel(self.tab_4)
-        self.timepoints_lab.setGeometry(QtCore.QRect(10, 10, 85, 20))
-        self.timepoints_lab.setObjectName("timepoints_lab")
+        self.ensamble_lab = QtWidgets.QLabel(self.tab_4)
+        self.ensamble_lab.setGeometry(QtCore.QRect(10, 10, 85, 20))
+        self.ensamble_lab.setObjectName("ensamble_lab")
 
-        self.timepoints_lineEdit = QtWidgets.QLineEdit(self.tab_4)
-        self.timepoints_lineEdit.setGeometry(QtCore.QRect(100, 10, 50, 20))
-        self.timepoints_lineEdit.setObjectName("timepoints_lineEdit")
+        self.ensamble_lineEdit = QtWidgets.QLineEdit(self.tab_4)
+        self.ensamble_lineEdit.setGeometry(QtCore.QRect(100, 10, 50, 20))
+        self.ensamble_lineEdit.setObjectName("ensamble_lineEdit")
 
-        self.Helptimepoints = QtWidgets.QPushButton(self.tab_4)
-        self.Helptimepoints.setGeometry(QtCore.QRect(160, 10, 50, 20))
-        self.Helptimepoints.setObjectName("Helptimepoints")
+        self.Helpensamble = QtWidgets.QPushButton(self.tab_4)
+        self.Helpensamble.setGeometry(QtCore.QRect(160, 10, 50, 20))
+        self.Helpensamble.setObjectName("Helpensamble")
 
         self.lam_em_lab = QtWidgets.QLabel(self.tab_4)
         self.lam_em_lab.setGeometry(QtCore.QRect(10, 32, 85, 20))
@@ -412,11 +436,13 @@ class Ui_MainWindow(object):
         self.Helppos.clicked.connect(lambda: self.helpLens('pos'))
         self.Helppixel.clicked.connect(lambda: self.helpCamera('pixel'))
         self.Helpvoxel.clicked.connect(lambda: self.helpCamera('vox'))
+        self.HelpRMS.clicked.connect(lambda: self.helpCamera('RMS'))
+        self.Helpoffset.clicked.connect(lambda: self.helpCamera('offset'))
         self.HelpOTF.clicked.connect(lambda: self.helpCamera('OTF'))
         self.Helpopening.clicked.connect(lambda: self.helpLightSheet('opening'))
         self.Helplamex.clicked.connect(lambda: self.helpLightSheet('lam'))
         self.Helppolex.clicked.connect(lambda: self.helpLightSheet('pol'))
-        self.Helptimepoints.clicked.connect(lambda: self.helpTracing('timepoints'))
+        self.Helpensamble.clicked.connect(lambda: self.helpTracing('ensamble'))
         self.Helplamem.clicked.connect(lambda: self.helpTracing('lam'))
         self.HelpSNR.clicked.connect(lambda: self.helpTracing('SNR'))
         self.Helpani.clicked.connect(lambda: self.helpTracing('ani'))
@@ -464,6 +490,14 @@ class Ui_MainWindow(object):
         self.voxel_lineEdit.setText(_translate("MainWindow", "2"))
         self.Helpvoxel.setText(_translate("MainWindow", "Help"))
 
+        self.RMS_lab.setText(_translate("MainWindow", "Readout noise:"))
+        self.RMS_lineEdit.setText(_translate("MainWindow", "1.4"))
+        self.HelpRMS.setText(_translate("MainWindow", "Help"))
+
+        self.offset_lab.setText(_translate("MainWindow", "Base level:"))
+        self.offset_lineEdit.setText(_translate("MainWindow", "100"))
+        self.Helpoffset.setText(_translate("MainWindow", "Help"))
+
         self.OTF_size_lab.setText(_translate("MainWindow", "OTF size:"))
         self.OTF_size_lineEdit.setText(_translate("MainWindow", "256"))
         self.HelpOTF.setText(_translate("MainWindow", "Help"))
@@ -497,9 +531,9 @@ class Ui_MainWindow(object):
         ########################################################################
         #Tracing tab
 
-        self.timepoints_lab.setText(_translate("MainWindow", "Orientations:"))
-        self.timepoints_lineEdit.setText('10')
-        self.Helptimepoints.setText(_translate("MainWindow", "Help"))
+        self.ensamble_lab.setText(_translate("MainWindow", "Orientations:"))
+        self.ensamble_lineEdit.setText('10')
+        self.Helpensamble.setText(_translate("MainWindow", "Help"))
 
         self.lam_em_lab.setText(_translate("MainWindow", "λ emission [nm]:"))
         self.em_lineEdit.setText(str(round(self.system.lam_em*1e9)))
@@ -519,7 +553,7 @@ class Ui_MainWindow(object):
         self.axmag_lab_2.setText(_translate("MainWindow", "N/A"))
 
         self.savename_lab.setText(_translate("MainWindow", "Save name:"))
-        self.savename_lineEdit.setText('something')
+        self.savename_lineEdit.setText('tmp')
 
         self.TraceSystem.setText(_translate("MainWindow", "Trace"))
 
@@ -531,7 +565,8 @@ class Ui_MainWindow(object):
     def add_system(self):
         lam_ex = 488e-9
         lam_em = 507e-9
-        self.system = Microscope(lam_ex,lam_em)
+        path = 'tmp'
+        self.system = Microscope(lam_ex,lam_em,path)
 
     def makeLens(self):
         try:
@@ -576,12 +611,22 @@ class Ui_MainWindow(object):
             self.critError('voxel size')
             return
         try:
+            RMS = float(self.RMS_lineEdit.text())
+        except:
+            self.critError('RMS')
+            return
+        try:
+            offset = int(self.offset_lineEdit.text())
+        except:
+            self.critError('offset')
+            return
+        try:
             self.system.OTF_res = int(self.OTF_size_lineEdit.text())
         except:
             self.critError('OTF size')
             return
 
-        self.system.add_camera(res,vox)
+        self.system.add_camera(res,vox,offset,RMS)
         self.figure.update_plot()
         self.update_system()
 
@@ -637,9 +682,9 @@ class Ui_MainWindow(object):
 
     def trace(self):
         try:
-            self.system.timepoints = int(self.timepoints_lineEdit.text())
+            self.system.ensamble = int(self.ensamble_lineEdit.text())
         except:
-            self.critError('timepoints')
+            self.critError('ensamble')
             return
 
         try:
@@ -672,13 +717,7 @@ class Ui_MainWindow(object):
 
         self.system.calculate_PSF(self)
 
-        with tifffile.TiffWriter(saveloc+'/PSF.tiff') as stack:
-            stack.save(self.system.eff_PSF.transpose(2,1,0),contiguous=True)
-
-        with tifffile.TiffWriter(saveloc+'/MTF.tiff') as stack:
-            stack.save(self.system.MTF.transpose(2,1,0),contiguous=True)
-
-        metadata = {'Dipoles in ensamble' : self.system.timepoints,
+        metadata = {'Dipoles in ensamble' : self.system.ensamble,
                     'Emission wavelength [nm]' : np.round(self.system.lam_em*1e9,2),
                     'Excitation wavelength [nm]' : np.round(self.system.lam_ex*1e9,2),
                     'Full FoV [pixels]' : self.system.camera.res,
@@ -693,11 +732,13 @@ class Ui_MainWindow(object):
 
         res_data = {'X_res [nm]' : self.system.XYZ_res[0],
                     'Y_res [nm]' : self.system.XYZ_res[1],
-                    'Y_p_res [nm]' : self.system.XYZ_res[2],
-                    'Z_p_res [nm]' : self.system.XYZ_res[3]}
+                    'Z_res [nm]' : self.system.XYZ_res[2],
+                    'X_FWHM [nm]' : self.system.FWHM[0],
+                    'Y_FWHM [nm]' : self.system.FWHM[1],
+                    'Z_FWHM [nm]' : self.system.FWHM[2]}
 
         with open(saveloc+'/data.json', 'w') as output:
-            json.dump(metadata, output, indent=4)
+            json.dump(metadata|res_data, output, indent=4)
 
         self.TraceSystem.setText('Done!')
 
@@ -741,6 +782,15 @@ class Ui_MainWindow(object):
             msg.setText('Voxel size of camera chip')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
             msg.setDetailedText('Sampling rate of the electric field in the image space. \nThe field of view will be the voxel size times the number of pixels. \nUndersampling might lead to bugs.')
+        elif param == 'RMS':
+            msg.setWindowTitle('Camera noise')
+            msg.setText('RMS of the camera readout')
+            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
+            msg.setDetailedText('Camera noise is modeled as gaussian noise. \nThe standard deviation of the Gaussian distribution is given by the readout RMS (root mean squared) of the camera.')
+        elif param == 'offset':
+            msg.setWindowTitle('Camera offset')
+            msg.setText('Base pixel intensity of the camera readout.')
+            msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
         elif param == 'OTF':
             msg.setWindowTitle('OTF size')
             msg.setText('Number of pixels in the OTF')
@@ -771,7 +821,7 @@ class Ui_MainWindow(object):
 
     def helpTracing(self,param):
         msg = QtWidgets.QMessageBox()
-        if param == 'timepoints':
+        if param == 'ensamble':
             msg.setWindowTitle('Orientations')
             msg.setText('Number of orientations in the dipole ensamble')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
