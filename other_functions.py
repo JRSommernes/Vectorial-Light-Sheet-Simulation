@@ -72,7 +72,7 @@ def multidot(arr):
     """
     num,res,a,b,c = arr.shape
     if num == 1:
-        return arr.reshape(res,a,b,c)
+        return np.squeeze(arr)
     out = np.zeros_like(arr[0])
     for i in range(res):
         for j in range(res):

@@ -2,6 +2,7 @@ from scipy.optimize import curve_fit
 from other_functions import *
 import numpy as np
 import tifffile
+import json
 import os
 
 class Lens:
@@ -28,6 +29,70 @@ class Lens:
         self.NA = NA    #Numerical aperture
         self.RI = RI    #Refractive index
         self.rot = rot  #Rotation of lens
+
+    def collimating(self,theta,phi,dir):
+        transform = []
+        #Lens refraction
+        self.theta = theta
+        self.phi = phi
+        transform.append(L_refraction(dir*theta))
+
+        #Rotation of the optical axis
+        if self.rot != 0:
+            Rx = R_x(-self.rot)
+            ki = np.array((np.sin(theta)*np.cos(phi),
+                            np.sin(theta)*np.sin(phi),
+                            np.cos(theta)))
+            kf = np.einsum('ij,jkl->ikl',Rx,ki)
+            phi = (np.arctan2(kf[1], kf[0]))
+            theta = np.arctan2(np.sqrt(kf[0]**2+kf[1]**2),kf[2])
+            theta[kf[2]<0] = np.NaN
+            transform.append(R_z(self.phi))
+            transform.append(np.broadcast_to(R_x(self.rot),(len(phi),len(phi),3,3)))
+            transform.append(np.linalg.inv(R_z(phi)))
+
+        self.theta_prev = theta
+        self.phi_prev = phi
+        #Lens transform
+        self.transform = multidot(np.array(transform))
+        self.apodization = 1/(np.sqrt(np.cos(self.theta)/self.RI))
+    
+    def focusing(self,theta,phi,RI_next,dir):
+        transform = []
+        self.theta_next = theta
+        self.phi_next = phi
+
+        #Transmission through a refractive index change
+        if RI_next != self.RI:
+            theta = np.arcsin(RI_next*np.sin(theta)/self.RI)
+            phi = phi
+            transform.append(R_y(-1*dir*self.theta_next))
+            transform.append(Fresnel(theta,self.theta_next,self.RI,RI_next))
+            transform.append(R_y(dir*theta))
+      
+        #Rotation of the optical axis
+        if self.rot != 0:
+            Rx = R_x(-self.rot)
+            ki = np.array((np.sin(theta)*np.cos(phi),
+                            np.sin(theta)*np.sin(phi),
+                            np.cos(theta)))
+            kf = np.einsum('ij,jkl->ikl',Rx,ki)
+            theta = np.arctan2(np.sqrt(kf[0]**2+kf[1]**2),kf[2])
+            theta[kf[2]<0] = np.NaN
+            transform.append(R_z(phi))
+            phi = (np.arctan2(kf[1], kf[0]))
+            transform.append(np.broadcast_to(R_x(self.rot),(len(phi),len(phi),3,3)))
+            transform.append(np.linalg.inv(R_z(phi)))
+
+        self.theta = theta
+        self.theta[theta>np.arcsin(self.NA/self.RI)] = np.NaN
+        self.phi = phi
+        #Lens refraction
+        transform.append(L_refraction(dir*self.theta))
+
+        #Lens transform
+        self.transform = multidot(np.array(transform))
+        self.apodization = np.sqrt(np.cos(self.theta)/self.RI)
 
 
 class Camera:
@@ -220,143 +285,43 @@ class Microscope:
         k_z = np.nan_to_num(k_z)
         self.ls_PSF = dft2_volume(Ef,k_z,z_val,bao,res,scaling).transpose(1,2,0)
 
-    def field_tracing_reverse(self):
-        """Ray traces the system and calculates the transformation. The ray
-           trace starts at the last lens of the system and moves towards the
-           first. This is done so we can define the sampling in the image space
-           to be uniform, and thus use a fast field evaluation using a fourier
-           transform.
-
-        """
+    def field_trace(self):
         #Defines the resolution of the electric field trace
         M = self.camera.res//2
         x = y = np.linspace(-M,M,self.camera.res)
         xx,yy = np.meshgrid(x,y)
         RR = np.sqrt(xx**2+yy**2)
 
-        #Makes a list of lenses starting at the last lens of the system
-        #and define the rotation direction (defined by the direction of the
-        #lens focus in the z-axis)
-        lenses = []
-        rotation_direction = np.ones(len(self.lenses),dtype=np.uint8)*-1
-        for i in range(1,len(self.lenses)+1):
-            lenses.append(self.lenses[-i])
-            rotation_direction[-i] *= (-1)**((i+1)//2+1)
-
-        #Calculates the wavenumber proportiones by the NA of the last lens
-        del_K = self.k0*lenses[0].NA/M
+        rotation_direction = np.flip((-1)**(np.arange(len(self.lenses))//2%2+1))
+        
+        del_K = self.k0*self.lenses[-1].NA/M
+        theta_tmp = np.arcsin((del_K/(self.k0*self.lenses[-1].RI))*RR)
+        phi_tmp = np.arctan2(yy,xx)
+        RI_next = self.lenses[-1].RI
 
         #Iterates through the lenses and append the coordinate transform
         #of the lens to a list
-        modes = ['collimating','focusing']
-        apodization = np.ones((self.camera.res,self.camera.res))
-        for i,lens in enumerate(lenses):
+        trans = [np.linalg.inv(R_z(phi_tmp))]
+        self.apodization = np.ones_like(phi_tmp)
+        for i,lens in enumerate(list(reversed(self.lenses))):
             #Determines if the lens is focusing or collimating
-            mode = modes[(i+1)%2]
             dir = rotation_direction[i]
+            if i%2 == 0:
+                lens.focusing(theta_tmp,phi_tmp,RI_next,dir)
+                pupil = lens.RI*np.sin(lens.theta)/lens.NA
+                phi_tmp = lens.phi
+            if i%2 == 1:
+                theta_tmp = np.arcsin(lens.NA*pupil/lens.RI)
+                lens.collimating(theta_tmp,phi_tmp,dir)
+                theta_tmp = lens.theta_prev
+                phi_tmp = lens.phi_prev
+                RI_next = lens.RI
 
-            if i == 0:
-                #Special case for the first lens in the system, creating the
-                #transformation list and the spherical coordinates of the lenses
-                lens.theta = np.arcsin((del_K/(self.k0*lens.RI))*RR)
-                lens.phi = np.arctan2(yy,xx)
-                jones_mat = [np.linalg.inv(R_z(lens.phi))]
-                jones_mat.append(L_refraction(dir*lens.theta))
-                apodization *= np.sqrt(lens.RI*np.cos(lens.theta))
+            trans.append(lens.transform)
+            self.apodization *= lens.apodization
 
-            elif mode == 'collimating':
-                #If the lens is collimating, a lens transformation is added to
-                #the transform list
-                lens.theta = np.arcsin(lens.NA*tmp_lens.RI*np.sin(tmp_lens.theta)/(lens.RI*tmp_lens.NA))
-                lens.phi = tmp_lens.phi
-                jones_mat.append(L_refraction(dir*lens.theta))
-                apodization /= np.sqrt(lens.RI*np.cos(lens.theta))
-
-            elif mode == 'focusing':
-                #If the lens is focusing, there are three cases:
-                #
-                #1) There is a rotation between the focusing and collimating
-                #   optical axes. And the potential refractive index change is
-                #   orthogonal to the focusing lens optical axis
-                #
-                #2) There is a rotation between the focusing and collimating
-                #   optical axes. And the potential refractive index change is
-                #   orthogonal to the collimating lens optical axis
-                #
-                #3) There is no rotation between the focusing and collimating
-                #   optical axes. And the potential refractiv index change is
-                #   orthogonal to the optical axis
-                #
-                #In all cases, there can be a refractive index change between
-                #the two lenses.
-                if not lens.rot == 0: #Case 1)
-                    Rx = R_x(-lens.rot)
-                    ki = np.array((np.sin(tmp_lens.theta)*np.cos(tmp_lens.phi),
-                                   np.sin(tmp_lens.theta)*np.sin(tmp_lens.phi),
-                                   np.cos(tmp_lens.theta)))
-                    kf = np.einsum('ij,jkl->ikl',Rx,ki)
-                    phi = (np.arctan2(kf[1], kf[0]))
-                    theta = np.arctan2(np.sqrt(kf[0]**2+kf[1]**2),kf[2])
-                    theta[kf[2]<0] = np.NaN
-
-                    jones_mat.append(R_z(tmp_lens.phi))
-                    Rx_mat = np.broadcast_to(R_x(lens.rot),(self.camera.res,self.camera.res,3,3))
-                    jones_mat.append(Rx_mat)
-                    jones_mat.append(np.linalg.inv(R_z(phi)))
-
-                    lens.theta = np.arcsin(tmp_lens.RI*np.sin(theta)/lens.RI)
-                    lens.phi = phi
-                    jones_mat.append(R_y(-1*dir*theta))
-                    jones_mat.append(Fresnel(lens.theta,theta,lens.RI,tmp_lens.RI))
-                    jones_mat.append(R_y(dir*lens.theta))
-                    jones_mat.append(L_refraction(dir*lens.theta))
-
-                elif not tmp_lens.rot == 0: #Case 2)
-                    theta = np.arcsin(tmp_lens.RI*np.sin(tmp_lens.theta)/lens.RI)
-                    phi = tmp_lens.phi
-                    jones_mat.append(R_y(-1*dir*tmp_lens.theta))
-                    jones_mat.append(Fresnel(theta,tmp_lens.theta,lens.RI,tmp_lens.RI))
-                    jones_mat.append(R_y(dir*theta))
-
-                    Rx = R_x(-tmp_lens.rot)
-                    ki = np.array((np.sin(theta)*np.cos(phi),
-                                   np.sin(theta)*np.sin(phi),
-                                   np.cos(theta)))
-                    kf = np.einsum('ij,jkl->ikl',Rx,ki)
-                    lens.phi = (np.arctan2(kf[1], kf[0]))
-                    lens.theta = np.arctan2(np.sqrt(kf[0]**2+kf[1]**2),kf[2])
-                    lens.theta[kf[2]<0] = np.NaN
-
-                    jones_mat.append(R_z(phi))
-                    Rx_mat = np.broadcast_to(R_x(tmp_lens.rot),(self.camera.res,self.camera.res,3,3))
-                    jones_mat.append(Rx_mat)
-                    jones_mat.append(np.linalg.inv(R_z(lens.phi)))
-                    jones_mat.append(L_refraction(dir*lens.theta))
-
-                else: #Case 3)
-                    lens.theta = np.arcsin(tmp_lens.RI*np.sin(tmp_lens.theta)/lens.RI)
-                    lens.phi = tmp_lens.phi
-                    jones_mat.append(R_y(-1*dir*tmp_lens.theta))
-                    jones_mat.append(Fresnel(lens.theta,tmp_lens.theta,lens.RI,tmp_lens.RI))
-                    jones_mat.append(R_y(dir*lens.theta))
-                    jones_mat.append(L_refraction(dir*lens.theta))
-
-                apodization *= np.sqrt(lens.RI*np.cos(lens.theta))
-
-            #The lens that was iterated through is added as a temporary lens
-            #to be available during the next iteration
-            th_max = np.arcsin(lens.NA/lens.RI)
-            lens.theta[lens.theta>th_max] = np.NaN
-            tmp_lens = lens
-
-        #Calculates the transform matrix from the list of transform matrices.
-        #The final field can then be calculated using: E_f = T * E_i
-        #Where E_f is the final field, T is the transform matrix, * is a dot
-        #product and E_i is the initial field
-        jones_mat.append(R_z(lenses[-1].phi))
-        self.jones_mat = np.array(jones_mat)
-        self.transform = multidot(self.jones_mat)
-        self.apodization = apodization            
+        trans.append(R_z(self.lenses[0].phi_prev))
+        self.transform = multidot(np.array(trans))
 
     def make_MTF(self):
         """Calculates the MTF of the system using a Fourier transform.
@@ -443,7 +408,7 @@ class Microscope:
         yy = PSF[:,self.camera.res//2,self.camera.res//2]
         zz = PSF[self.camera.res//2,self.camera.res//2,:]
 
-        guess = np.array((xx.max(), 0, self.camera.vox/self.mag))
+        guess = np.array((xx.max(), 0, self.lam_ex/(2*self.lenses[0].NA)))
 
         x = np.linspace(-self.FoV/2,self.FoV/2,self.camera.res)
         x_fit, _ = curve_fit(gaussian, x, xx, p0=guess)
@@ -454,7 +419,42 @@ class Microscope:
         _, _, y_sigma = y_fit
         _, _, z_sigma = z_fit
 
-        self.FWHM = np.array((x_sigma,y_sigma,z_sigma))*2.355*1e9
+        self.FWHM = np.array((x_sigma,y_sigma,z_sigma))*2*np.sqrt(2*np.log(2))
+
+    def save_data(self):
+        data = {'Dipoles in ensamble' : self.ensamble,
+                'Emission wavelength [nm]' : np.round(self.lam_em*1e9,2),
+                'Excitation wavelength [nm]' : np.round(self.lam_ex*1e9,2),
+                'Full FoV [pixels]' : self.camera.res,
+                'Full FoV in object space [microns]' : self.FoV*1e6,
+                'Light sheet opening [degrees]' : np.round(self.ls_opening*180/np.pi),
+                'Magnification transverse' : self.mag,
+                'Magnification axial' : self.axial_mag,
+                'MTF base frequency' : self.base_freq,
+                'MTF size [pixels]' : self.OTF_res,
+                'Optical efficiency' : self.tti,
+                'Voxel size [microns]' : self.camera.vox*1e6}
+    
+        try:
+            self.analyze()
+            res = {'X_res [nm]' : self.XYZ_res[0],
+                   'Y_res [nm]' : self.XYZ_res[1],
+                   'Z_res [nm]' : self.XYZ_res[2]}
+            data = data|res
+        except:
+            print('Auto analyze failed')
+
+        try:
+            self.FWHM_measurement()
+            FWHM = {'X_FWHM [nm]' : self.FWHM[0]*1e9,
+                    'Y_FWHM [nm]' : self.FWHM[1]*1e9,
+                    'Z_FWHM [nm]' : self.FWHM[2]*1e9}
+            data = data|FWHM
+        except:
+            print('FWHM could not be found')
+
+        with open(self.path+'/data.json', 'w') as output:
+            json.dump(data, output, indent=4)
 
     def calculate_PSF(self,GUI=None):
         """Main function that creates the system PSF and MTF
@@ -469,7 +469,7 @@ class Microscope:
         res = self.camera.res
 
         #Traces the system and light-sheet
-        self.field_tracing_reverse()
+        self.field_trace()
         self.light_sheet()
 
         #Defines the z-sampling in image space
@@ -548,8 +548,7 @@ class Microscope:
         #Calculates the MTF and analyzes is
         self.make_MTF()
         self.save_stacks()
-        self.analyze()
-        self.FWHM_measurement()
+        self.save_data()
 
 
 ################################################################################
@@ -569,27 +568,23 @@ def add_lenses(system):
     system.add_lens(NA_1,RI_1)
 
     NA_2 = 0.25
-    RI_2 = 1
-    system.add_lens(NA_2,RI_2)
+    system.add_lens(NA_2)
 
     NA_4 = 0.95
-    RI_4 = 1
-    rot_4 = 0
-    system.add_lens(NA_4,RI_4,rot=rot_4)
+    rot_4 = 40*np.pi/180
+    system.add_lens(NA_4,rot=rot_4)
 
-    NA_3 = NA_2*(RI_1*NA_4)/(RI_4*NA_1)
-    RI_3 = 1
-    system.add_lens(NA_3,RI_3,pos=2)
+    NA_3 = NA_2*(RI_1*NA_4)/(NA_1)
+    system.add_lens(NA_3,pos=2)
 
     NA_5 = 1
     RI_5 = 1.7
-    rot_5 = 40*np.pi/180
-    system.add_lens(NA_5,RI_5,rot=rot_5)
+    system.add_lens(NA_5,RI_5)
 
-    NA_6 = 1/40
+    NA_6 = NA_5/40
     system.add_lens(NA_6)
 
-def make_system(system):
+def make_system():
     """Determines system configuration such as lens setup, camera configuration,
        dipoles in ensamble, light-sheet polarisation and opening, and SNR
 
@@ -599,6 +594,10 @@ def make_system(system):
         Microscope class
 
     """
+    ex = 488e-9 #Excitation wavelength
+    em = 507e-9 #Emission wavelength
+    path = 'test'
+    system = Microscope(ex,em,path) #Creates microscope
     add_lenses(system) #Adds lenses to the system
     system.add_camera(128,2e-6,100,1.4) #Defines camera config
 
@@ -610,69 +609,11 @@ def make_system(system):
     system.SNR = 20 #Signal to noise ratio
 
     system.calculate_system_specs()
+    return system
 
 #Function to simulate pre-defined system
 #made by the functions above
 if __name__ == '__main__':
-    ex = 488e-9 #Excitation wavelength
-    em = 507e-9 #Emission wavelength
-    path = 'test3'
-    system = Microscope(ex,em,path) #Creates microscope
-    make_system(system) #Determines the rest of the system configuration
+    system = make_system() #Determines the rest of the system configuration
     system.calculate_PSF() #Calculates the PSF of the system
 
-    # import matplotlib.pyplot as plt
-    # fig,ax = plt.subplots(2,2)
-    # ax[0,0].imshow(system.PSF_poisson[:,:,system.camera.res//2])
-    # ax[0,1].imshow(np.log(system.PSF_poisson[:,:,system.camera.res//2]+1))
-    # ax[1,0].imshow(system.PSF_readout[:,:,system.camera.res//2])
-    # ax[1,1].imshow(np.log(system.PSF_readout[:,:,system.camera.res//2]+1))
-    # plt.show()
-    #
-    # fig,ax = plt.subplots(3,2)
-    # ax[0,0].imshow(system.MTF_readout[:,:,system.OTF_res//2])
-    # ax[0,1].imshow(np.log(system.MTF_readout[:,:,system.OTF_res//2]))
-    # ax[1,0].imshow(system.MTF_background[:,:,system.OTF_res//2])
-    # ax[1,1].imshow(np.log(system.MTF_background[:,:,system.OTF_res//2]))
-    # ax[2,0].imshow(system.MTF_readout[:,:,system.OTF_res//2]-system.MTF_background[:,:,system.OTF_res//2])
-    # ax[2,1].imshow(np.log(system.MTF_readout[:,:,system.OTF_res//2]-system.MTF_background[:,:,system.OTF_res//2]))
-    # plt.show()
-
-    
-    import json
-    
-    path = 'test2'
-    if not os.path.exists(path):
-        os.mkdir(path)
-
-    with tifffile.TiffWriter(path+'/PSF_poisson.tiff') as stack:
-        stack.save(system.PSF_poisson.transpose(2,1,0),contiguous=True)
-    with tifffile.TiffWriter(path+'/PSF_readout.tiff') as stack:
-        stack.save(system.PSF_readout.transpose(2,1,0),contiguous=True)
-    with tifffile.TiffWriter(path+'/MTF_poisson.tiff') as stack:
-        stack.save(system.MTF_poisson.transpose(2,1,0),contiguous=True)
-    with tifffile.TiffWriter(path+'/MTF_readout.tiff') as stack:
-        stack.save(system.MTF_readout.transpose(2,1,0),contiguous=True)
-
-    metadata = {'Dipoles in ensamble' : system.ensamble,
-                'Emission wavelength [nm]' : np.round(system.lam_em*1e9,2),
-                'Excitation wavelength [nm]' : np.round(system.lam_ex*1e9,2),
-                'Full FoV [pixels]' : system.camera.res,
-                'Full FoV in object space [microns]' : system.FoV*1e6,
-                'Light sheet opening [degrees]' : np.round(system.ls_opening*180/np.pi),
-                'Magnification transverse' : system.mag,
-                'Magnification axial' : system.axial_mag,
-                'MTF base frequency' : system.base_freq,
-                'MTF size [pixels]' : system.OTF_res,
-                'Optical efficiency' : system.tti,
-                'Voxel size [microns]' : system.camera.vox*1e6}
-
-    res_data = {'X_res [nm]' : system.XYZ_res[0],
-                'Y_res [nm]' : system.XYZ_res[1],
-                'Z_res [nm]' : system.XYZ_res[2],
-                'X_FWHM [nm]' : system.FWHM[0]*1e9,
-                'Y_FWHM [nm]' : system.FWHM[1]*1e9,
-                'Z_FWHM [nm]' : system.FWHM[2]*1e9}
-
-    with open(path+'/data.json', 'w') as output:
-        json.dump(metadata|res_data, output, indent=4)

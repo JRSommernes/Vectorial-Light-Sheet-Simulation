@@ -2,8 +2,8 @@ from matplotlib.backends.backend_qt5agg import FigureCanvasQTAgg
 from matplotlib.figure import Figure
 from PyQt5 import QtCore, QtWidgets
 from microscope import Microscope
-import tifffile, sys, os, json
 import numpy as np
+import sys, os
 
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
@@ -716,29 +716,6 @@ class Ui_MainWindow(object):
         self.TraceSystem.setText('Working')
 
         self.system.calculate_PSF(self)
-
-        metadata = {'Dipoles in ensamble' : self.system.ensamble,
-                    'Emission wavelength [nm]' : np.round(self.system.lam_em*1e9,2),
-                    'Excitation wavelength [nm]' : np.round(self.system.lam_ex*1e9,2),
-                    'Full FoV [pixels]' : self.system.camera.res,
-                    'Full FoV in object space [microns]' : self.system.FoV*1e6,
-                    'Light sheet opening [degrees]' : np.round(self.system.ls_opening*180/np.pi),
-                    'Magnification transverse' : self.system.mag,
-                    'Magnification axial' : self.system.axial_mag,
-                    'MTF base frequency' : self.system.base_freq,
-                    'MTF size [pixels]' : self.system.OTF_res,
-                    'Optical efficiency' : self.system.tti,
-                    'Voxel size [microns]' : self.system.camera.vox*1e6}
-
-        res_data = {'X_res [nm]' : self.system.XYZ_res[0],
-                    'Y_res [nm]' : self.system.XYZ_res[1],
-                    'Z_res [nm]' : self.system.XYZ_res[2],
-                    'X_FWHM [nm]' : self.system.FWHM[0],
-                    'Y_FWHM [nm]' : self.system.FWHM[1],
-                    'Z_FWHM [nm]' : self.system.FWHM[2]}
-
-        with open(saveloc+'/data.json', 'w') as output:
-            json.dump(metadata|res_data, output, indent=4)
 
         self.TraceSystem.setText('Done!')
 
