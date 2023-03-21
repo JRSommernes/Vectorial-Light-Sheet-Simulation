@@ -5,32 +5,115 @@ import tifffile
 import json
 import os
 
-class Lens:
-    """Class containing lens parameters
+################################################################################
+#Below is a test simulation not requiring the GUI. To alter the test system,
+#alter the code in the functions "make_system" and "run_simulation".
+################################################################################
+
+def make_system(path):
+    """Creates the system and adds the optical path.
 
     Parameters
     ----------
-    NA : Float
-        Numerical aperture of lens
-    RI : Float
-        Refractive index of the image space
-    rot : Float
-        Rotation of the lens around the x-axis
+    path : string
+        Determines the save location of the simulation files
 
-    Attributes
-    ----------
-    NA
-    RI
-    rot
-
+    Returns
+    -------
+    Class
+        microscope class
     """
+    ex = 488e-9 #Excitation wavelength
+    em = 507e-9 #Emission wavelength
+    system = Microscope(ex,em,path) #Creates microscope
 
+    #Lens 1
+    NA_1 = 1.35
+    RI_1 = 1.4
+    system.add_lens(NA_1,RI_1)
+
+    #Lens 2
+    NA_2 = 0.025
+    system.add_lens(NA_2)
+
+    #Lens 4
+    NA_4 = 0.95
+    rot_4 = 20*np.pi/180
+    system.add_lens(NA_4,rot=rot_4)
+
+    #Lens 3
+    NA_3 = NA_2*(RI_1*NA_4)/(NA_1)
+    system.add_lens(NA_3,pos=2)
+
+    #Lens 5
+    NA_5 = 1
+    RI_5 = 1.7
+    system.add_lens(NA_5,RI_5)
+
+    #Lens 6
+    NA_6 = NA_5/40
+    system.add_lens(NA_6)
+
+    #Camera
+    system.add_camera(128,2e-6,100,1.4) #Defines camera config
+    
+    return system
+
+def run_simulation():
+    """Determines the parameters of the system and runs the simulation.
+    """
+    
+    path = 'test'
+    system = make_system(path) #Adds lenses to the system
+
+    system.ensamble = 10 #Number of dipoles in ensamble
+    system.OTF_res = 256 #Size of OTF in pixels
+    system.ls_pol = 'u' #Ls polarization ['p', 's', or 'u']
+    system.anisotropy = 0.4 #Anisotropy [0, or 0.4]
+    system.ls_opening = 5*np.pi/180 #Ls opening half-angle in degrees
+    system.SNR = 20 #Signal to noise ratio
+
+    system.calculate_system_specs()
+    system.calculate_PSF()
+
+################################################################################
+#The simulation code starts below. Alter at your own risk.
+################################################################################
+
+class Lens:
+    """ Class containing lens parameters. Also contains
+        functions for focusing and collimating a beam.
+    """
     def __init__(self,NA,RI,rot):
+        """Initialization of the lens class
+
+        Parameters
+        ----------
+        NA : Float
+            Numerical aperture of the lens
+        RI : Float
+            Refractive index of the medium in image space
+        rot : Float
+            Rotation between the current and new optical axis
+        """
         self.NA = NA    #Numerical aperture
         self.RI = RI    #Refractive index
         self.rot = rot  #Rotation of lens
 
     def collimating(self,theta,phi,dir):
+        """Function for transform matrix
+           corresponding to a collimating lens.
+
+        Parameters
+        ----------
+        theta : float64 numpy array
+            Polar angles of rays before lens refraction
+        phi : float64 numpy array
+            Azimuthal angles of rays before lens refraction
+        dir : int
+            Direction of of ray rotation in lens refraction.
+            Direction is given around the azimuthal axis.
+        """
         transform = []
         #Lens refraction
         self.theta = theta
@@ -51,13 +134,31 @@ class Lens:
             transform.append(np.broadcast_to(R_x(self.rot),(len(phi),len(phi),3,3)))
             transform.append(np.linalg.inv(R_z(phi)))
 
+        #Downstream ray angles
         self.theta_prev = theta
         self.phi_prev = phi
-        #Lens transform
+        #Effective lens matrix and apodization
         self.transform = multidot(np.array(transform))
         self.apodization = 1/(np.sqrt(np.cos(self.theta)/self.RI))
     
     def focusing(self,theta,phi,RI_next,dir):
+        """Function for transform matrix
+           corresponding to a focusing lens.
+
+        Parameters
+        ----------
+        theta : float64 numpy array
+            Polar angles of rays before lens refraction
+        phi : float64 numpy array
+            Azimuthal angles of rays before lens refraction
+        RI_next : Float
+            Refractive index of the next lens in the system.
+            If there is no next lens, input the same refractive 
+            index as the current lens.
+        dir : int
+            Direction of of ray rotation in lens refraction.
+            Direction is given around the azimuthal axis.
+        """
         transform = []
         self.theta_next = theta
         self.phi_next = phi
@@ -84,13 +185,14 @@ class Lens:
             transform.append(np.broadcast_to(R_x(self.rot),(len(phi),len(phi),3,3)))
             transform.append(np.linalg.inv(R_z(phi)))
 
+        #Downstream ray angles
         self.theta = theta
         self.theta[theta>np.arcsin(self.NA/self.RI)] = np.NaN
         self.phi = phi
         #Lens refraction
         transform.append(L_refraction(dir*self.theta))
 
-        #Lens transform
+        #Effective lens matrix and apodization
         self.transform = multidot(np.array(transform))
         self.apodization = np.sqrt(np.cos(self.theta)/self.RI)
 
@@ -270,7 +372,8 @@ class Microscope:
         jones_mat.append(R_z(phi))
         jones_mat = np.array(jones_mat)
         transform = multidot(jones_mat)
-        Ef = np.nan_to_num(np.einsum('abji,abi->abj', transform, Ei))
+        apodization = np.sqrt(np.cos(theta)/self.lenses[0].RI).reshape(res,res,1)
+        Ef = apodization*np.nan_to_num(np.einsum('abji,abi->abj', transform, Ei))
 
         #Defines the back aperture obliqueness of the electric field
         bao = np.nan_to_num(1 / np.cos(theta))
@@ -333,8 +436,7 @@ class Microscope:
         product = np.pad(self.eff_PSF,padding)
 
         #Adds noise to the PSF
-        if self.SNR != 0: #zero SNR is defined as no noise
-            product, poisson = add_noise(product,self.SNR**2,self.camera.offset,self.camera.RMS)
+        product, poisson = add_noise(product,self.SNR**2,self.camera.offset,self.camera.RMS)
 
         #Snips out the effective PSF with noise to save
         self.PSF_poisson = poisson[padding:padding+self.camera.res,
@@ -422,6 +524,8 @@ class Microscope:
         self.FWHM = np.array((x_sigma,y_sigma,z_sigma))*2*np.sqrt(2*np.log(2))
 
     def save_data(self):
+        readout_SNR = self.SNR**2/np.sqrt(self.SNR**2+self.camera.RMS**2)
+
         data = {'Dipoles in ensamble' : self.ensamble,
                 'Emission wavelength [nm]' : np.round(self.lam_em*1e9,2),
                 'Excitation wavelength [nm]' : np.round(self.lam_ex*1e9,2),
@@ -433,6 +537,8 @@ class Microscope:
                 'MTF base frequency' : self.base_freq,
                 'MTF size [pixels]' : self.OTF_res,
                 'Optical efficiency' : self.tti,
+                'SNR poisson'   :   self.SNR,
+                'SNR readout'   :   readout_SNR,
                 'Voxel size [microns]' : self.camera.vox*1e6}
     
         try:
@@ -550,70 +656,8 @@ class Microscope:
         self.save_stacks()
         self.save_data()
 
-
-################################################################################
-#Example code for simulation without using GUI
-
-def add_lenses(system):
-    """Adds lenses to the system
-
-    Parameters
-    ----------
-    system : Class
-        Microscope class
-
-    """
-    NA_1 = 1.35
-    RI_1 = 1.4
-    system.add_lens(NA_1,RI_1)
-
-    NA_2 = 0.25
-    system.add_lens(NA_2)
-
-    NA_4 = 0.95
-    rot_4 = 40*np.pi/180
-    system.add_lens(NA_4,rot=rot_4)
-
-    NA_3 = NA_2*(RI_1*NA_4)/(NA_1)
-    system.add_lens(NA_3,pos=2)
-
-    NA_5 = 1
-    RI_5 = 1.7
-    system.add_lens(NA_5,RI_5)
-
-    NA_6 = NA_5/40
-    system.add_lens(NA_6)
-
-def make_system():
-    """Determines system configuration such as lens setup, camera configuration,
-       dipoles in ensamble, light-sheet polarisation and opening, and SNR
-
-    Parameters
-    ----------
-    system : Class
-        Microscope class
-
-    """
-    ex = 488e-9 #Excitation wavelength
-    em = 507e-9 #Emission wavelength
-    path = 'test'
-    system = Microscope(ex,em,path) #Creates microscope
-    add_lenses(system) #Adds lenses to the system
-    system.add_camera(128,2e-6,100,1.4) #Defines camera config
-
-    system.ensamble = 10 #Number of dipoles in ensamble
-    system.OTF_res = 256 #Size of OTF in pixels
-    system.ls_pol = 'u' #Ls polarization ['p', 's', or 'u']
-    system.anisotropy = 0.4 #Anisotropy [0, or 0.4]
-    system.ls_opening = 5*np.pi/180 #Ls opening half-angle in degrees
-    system.SNR = 20 #Signal to noise ratio
-
-    system.calculate_system_specs()
-    return system
-
-#Function to simulate pre-defined system
-#made by the functions above
+##############################################################
+#This function is executed if the current file is run directly
 if __name__ == '__main__':
-    system = make_system() #Determines the rest of the system configuration
-    system.calculate_PSF() #Calculates the PSF of the system
-
+    #Runs the test code given in the beginning of the file
+    run_simulation() 

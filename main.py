@@ -348,17 +348,17 @@ class Ui_MainWindow(object):
         self.Helplamem.setGeometry(QtCore.QRect(160, 32, 50, 20))
         self.Helplamem.setObjectName("Helplamem")
 
-        self.SNR_lab = QtWidgets.QLabel(self.tab_4)
-        self.SNR_lab.setGeometry(QtCore.QRect(10, 54, 85, 20))
-        self.SNR_lab.setObjectName("SNR_lab")
+        self.photons_lab = QtWidgets.QLabel(self.tab_4)
+        self.photons_lab.setGeometry(QtCore.QRect(10, 54, 85, 20))
+        self.photons_lab.setObjectName("photons_lab")
 
-        self.SNR_lineEdit = QtWidgets.QLineEdit(self.tab_4)
-        self.SNR_lineEdit.setGeometry(QtCore.QRect(100, 54, 50, 20))
-        self.SNR_lineEdit.setObjectName("SNR_lineEdit")
+        self.photons_lineEdit = QtWidgets.QLineEdit(self.tab_4)
+        self.photons_lineEdit.setGeometry(QtCore.QRect(100, 54, 50, 20))
+        self.photons_lineEdit.setObjectName("photons_lineEdit")
 
-        self.HelpSNR = QtWidgets.QPushButton(self.tab_4)
-        self.HelpSNR.setGeometry(QtCore.QRect(160, 54, 50, 20))
-        self.HelpSNR.setObjectName("HelpSNR")
+        self.Helpphotons = QtWidgets.QPushButton(self.tab_4)
+        self.Helpphotons.setGeometry(QtCore.QRect(160, 54, 50, 20))
+        self.Helpphotons.setObjectName("Helpphotons")
 
         self.ani_lab = QtWidgets.QLabel(self.tab_4)
         self.ani_lab.setGeometry(QtCore.QRect(10, 76, 85, 20))
@@ -444,8 +444,13 @@ class Ui_MainWindow(object):
         self.Helppolex.clicked.connect(lambda: self.helpLightSheet('pol'))
         self.Helpensamble.clicked.connect(lambda: self.helpTracing('ensamble'))
         self.Helplamem.clicked.connect(lambda: self.helpTracing('lam'))
-        self.HelpSNR.clicked.connect(lambda: self.helpTracing('SNR'))
+        self.Helpphotons.clicked.connect(lambda: self.helpTracing('photons'))
         self.Helpani.clicked.connect(lambda: self.helpTracing('ani'))
+
+        ########################################################################
+        #Initialize tabs with default values
+        self.makeCamera()
+        self.make_light_sheet()
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
@@ -539,9 +544,9 @@ class Ui_MainWindow(object):
         self.em_lineEdit.setText(str(round(self.system.lam_em*1e9)))
         self.Helplamem.setText(_translate("MainWindow", "Help"))
 
-        self.SNR_lab.setText(_translate("MainWindow", "SNR:"))
-        self.SNR_lineEdit.setText('100')
-        self.HelpSNR.setText(_translate("MainWindow", "Help"))
+        self.photons_lab.setText(_translate("MainWindow", "Photons:"))
+        self.photons_lineEdit.setText('400')
+        self.Helpphotons.setText(_translate("MainWindow", "Help"))
 
         self.ani_lab.setText(_translate("MainWindow", "Anisotropy:"))
         self.Helpani.setText(_translate("MainWindow", "Help"))
@@ -694,7 +699,7 @@ class Ui_MainWindow(object):
             return
 
         try:
-            self.system.SNR = float(self.SNR_lineEdit.text())
+            self.system.SNR = np.sqrt(int(self.photons_lineEdit.text()))
         except:
             self.critError('Signal to noise ratio')
             return
@@ -729,15 +734,15 @@ class Ui_MainWindow(object):
 
         elif param == 'RI':
             msg.setWindowTitle('Refractive index')
-            msg.setText('RI of immersion medium')
+            msg.setText('Refractive index of immersion medium')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
             msg.setDetailedText('The immersion medium will be on the side of the lens where the field is focused.')
 
         elif param == 'rot':
             msg.setWindowTitle('Lens rotation')
-            msg.setText('Rotation of the lens around the x-axis')
+            msg.setText('Defines a new optical axis, rotated around the x-axis')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.setDetailedText('If the rotated lens is a focusing lens, all previous components will be rotatet with the lens. \n\nIf there is a refractive index change between two lenses, the material surface will be orthogonal to the optical axis of the rotatet lens.')
+            msg.setDetailedText('The rotation of the lens is always calculated between the lens and the change in refractive index. \nE.g., if the change in refractive index should be orthogonal to the collimating lenses optical axis, the rotation must be included in the focusing lens.')
 
         elif param == 'pos':
             msg.setWindowTitle('Lens position')
@@ -763,7 +768,7 @@ class Ui_MainWindow(object):
             msg.setWindowTitle('Camera noise')
             msg.setText('RMS of the camera readout')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.setDetailedText('Camera noise is modeled as gaussian noise. \nThe standard deviation of the Gaussian distribution is given by the readout RMS (root mean squared) of the camera.')
+            msg.setDetailedText('Readout noise is modeled as gaussian noise. \nThe standard deviation of the Gaussian distribution is given by the readout RMS (root mean squared) of the camera.')
         elif param == 'offset':
             msg.setWindowTitle('Camera offset')
             msg.setText('Base pixel intensity of the camera readout.')
@@ -792,7 +797,7 @@ class Ui_MainWindow(object):
             msg.setWindowTitle('Polarization')
             msg.setText('Light-sheet polarization')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.setDetailedText('s-polarization is in the plane of the light-sheet, p-polarization is orthogonal to the light-sheet, and u-polarization is a super position of p- and s-polarization.')
+            msg.setDetailedText('The light-sheet can be s-, p- or, u-polarized. \ns-polarization is in the plane of the light-sheet, p-polarization is orthogonal to the light-sheet, and u-polarization is a super position of p- and s-polarization.')
 
         x = msg.exec_()
 
@@ -802,17 +807,16 @@ class Ui_MainWindow(object):
             msg.setWindowTitle('Orientations')
             msg.setText('Number of orientations in the dipole ensamble')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.setDetailedText('The orientations of the dipole is calculated using a Fibonacci lattice.')
+            msg.setDetailedText('Each orientation in the ensamble represent a unique dipole polarization. \nThe orientations of the dipole is calculated using a Fibonacci lattice.')
         elif param == 'lam':
             msg.setWindowTitle('Emission wavelength')
             msg.setText('Emission wavelength in nanometer')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.setDetailedText('The size of the PSF is dependent on the wavelength.')
-        elif param == 'SNR':
-            msg.setWindowTitle('SNR')
-            msg.setText('Signal to noise ratio')
+        elif param == 'photons':
+            msg.setWindowTitle('Photons')
+            msg.setText('Photon count')
             msg.setStandardButtons(QtWidgets.QMessageBox.Ok)
-            msg.setDetailedText('When given, random Poisson noise will be added to the PSF. \nFor a noise-less sample, set SNR to 0.')
+            msg.setDetailedText('Maximum photon count on the camera chip. \nUsing this, the signal to noise ratio assuming poisson noise is the square root of the photon count.')
         elif param == 'ani':
             msg.setWindowTitle('Anisotropy')
             msg.setText('Check for anisotropic sample')
