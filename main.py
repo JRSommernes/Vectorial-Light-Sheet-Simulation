@@ -689,7 +689,7 @@ class Ui_MainWindow(object):
         try:
             self.system.ensamble = int(self.ensamble_lineEdit.text())
         except:
-            self.critError('ensamble')
+            self.critError('ensamble size')
             return
 
         try:
@@ -701,7 +701,7 @@ class Ui_MainWindow(object):
         try:
             self.system.SNR = np.sqrt(int(self.photons_lineEdit.text()))
         except:
-            self.critError('Signal to noise ratio')
+            self.critError('photon count')
             return
 
         if self.checkBox_ani.isChecked():
