@@ -562,7 +562,7 @@ class Microscope:
         with open(self.path+'/data.json', 'w') as output:
             json.dump(data, output, indent=4)
 
-    def calculate_PSF(self,GUI=None):
+    def calculate_PSF(self,pbar=None):
         """Main function that creates the system PSF and MTF
 
         Parameters
@@ -614,7 +614,7 @@ class Microscope:
             #the user simulates from the terminal, the loadbar is directed to
             #the terminal
             try:
-                GUI.pbar.setValue(100*(i+1)//len(phi))
+                pbar.emit(100*(i+1)//len(phi))
             except:
                 loadbar(i,len(phi))
 

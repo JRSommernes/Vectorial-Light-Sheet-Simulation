@@ -104,6 +104,20 @@ class PlotCanvas(FigureCanvasQTAgg):
         self.draw()
 
 
+class system_worker(QtCore.QObject):
+    finished = QtCore.pyqtSignal()
+    progress = QtCore.pyqtSignal(int)
+
+    def make_system(self):
+        lam_ex = 488e-9
+        lam_em = 507e-9
+        path = 'tmp'
+        self.scope = Microscope(lam_ex,lam_em,path)
+
+    def run(self):
+        self.scope.calculate_PSF(self.progress)
+        self.finished.emit()
+
 class Ui_MainWindow(object):
     def setupUi(self,MainWindow):
         self.title = 'Optics simulations'
@@ -115,7 +129,8 @@ class Ui_MainWindow(object):
         ########################################################################
         #Initialize
 
-        self.add_system()
+        self.worker = system_worker()
+        self.worker.make_system()
         MainWindow.setObjectName(self.title)
         MainWindow.resize(self.width, self.height)
         MainWindow.setTabShape(QtWidgets.QTabWidget.Rounded)
@@ -402,6 +417,7 @@ class Ui_MainWindow(object):
 
         self.pbar = QtWidgets.QProgressBar(self.tab_4)
         self.pbar.setGeometry(380, 105, 185, 25)
+        self.worker.progress.connect(self.setProgressVal)
 
         ########################################################################
         #Tab creation
@@ -451,6 +467,9 @@ class Ui_MainWindow(object):
         #Initialize tabs with default values
         self.makeCamera()
         self.make_light_sheet()
+
+    def setProgressVal(self, val):
+        self.pbar.setValue(val)
 
     def retranslateUi(self, MainWindow):
         _translate = QtCore.QCoreApplication.translate
@@ -520,7 +539,7 @@ class Ui_MainWindow(object):
         self.Helpopening.setText(_translate("MainWindow", "Help"))
 
         self.lam_ex_lab.setText(_translate("MainWindow", "λ exitation [nm]:"))
-        self.ex_lineEdit.setText(str(round(self.system.lam_ex*1e9)))
+        self.ex_lineEdit.setText(str(round(self.worker.scope.lam_ex*1e9)))
         self.Helplamex.setText(_translate("MainWindow", "Help"))
 
         self.pol_ex_lab.setText(_translate("MainWindow", "exitation pol:"))
@@ -541,7 +560,7 @@ class Ui_MainWindow(object):
         self.Helpensamble.setText(_translate("MainWindow", "Help"))
 
         self.lam_em_lab.setText(_translate("MainWindow", "λ emission [nm]:"))
-        self.em_lineEdit.setText(str(round(self.system.lam_em*1e9)))
+        self.em_lineEdit.setText(str(round(self.worker.scope.lam_em*1e9)))
         self.Helplamem.setText(_translate("MainWindow", "Help"))
 
         self.photons_lab.setText(_translate("MainWindow", "Photons:"))
@@ -563,15 +582,9 @@ class Ui_MainWindow(object):
         self.TraceSystem.setText(_translate("MainWindow", "Trace"))
 
     def initPlot(self,MainWindow):
-        self.figure = PlotCanvas(self.system, MainWindow, width=self.width//100, height=self.height//200)
+        self.figure = PlotCanvas(self.worker.scope, MainWindow, width=self.width//100, height=self.height//200)
         self.figure.move(0,0)
         MainWindow.show()
-
-    def add_system(self):
-        lam_ex = 488e-9
-        lam_em = 507e-9
-        path = 'tmp'
-        self.system = Microscope(lam_ex,lam_em,path)
 
     def makeLens(self):
         try:
@@ -595,7 +608,7 @@ class Ui_MainWindow(object):
             self.critError('pos')
             return
 
-        self.system.add_lens(NA,RI,rot,pos)
+        self.worker.scope.add_lens(NA,RI,rot,pos)
         self.figure.update_plot()
         self.update_system()
 
@@ -626,23 +639,23 @@ class Ui_MainWindow(object):
             self.critError('offset')
             return
         try:
-            self.system.OTF_res = int(self.OTF_size_lineEdit.text())
+            self.worker.scope.OTF_res = int(self.OTF_size_lineEdit.text())
         except:
             self.critError('OTF size')
             return
 
-        self.system.add_camera(res,vox,offset,RMS)
+        self.worker.scope.add_camera(res,vox,offset,RMS)
         self.figure.update_plot()
         self.update_system()
 
     def make_light_sheet(self):
         try:
-            self.system.ls_opening = float(self.ls_opening_lineEdit.text())*np.pi/180
+            self.worker.scope.ls_opening = float(self.ls_opening_lineEdit.text())*np.pi/180
         except:
             self.critError('lightsheet opening')
             return
         try:
-            self.system.lam_ex = float(self.ex_lineEdit.text())*1e-9
+            self.worker.scope.lam_ex = float(self.ex_lineEdit.text())*1e-9
         except:
             self.critError('lightsheet excitation')
             return
@@ -650,7 +663,7 @@ class Ui_MainWindow(object):
         valid_pol = ['p','s','u']
         pol_ex = self.pol_ex_lineEdit.text()
         if pol_ex in valid_pol:
-            self.system.ls_pol = pol_ex
+            self.worker.scope.ls_pol = pol_ex
         else:
             self.critError('lightsheet polarization')
             return
@@ -658,8 +671,8 @@ class Ui_MainWindow(object):
         self.update_system()
 
     def update_system(self):
-        num_lenses = len(self.system.lenses)
-        if not hasattr(self.system, 'camera'):
+        num_lenses = len(self.worker.scope.lenses)
+        if not hasattr(self.worker.scope, 'camera'):
             self.FoV_lab_2.setText('N/A')
             self.mag_lab_2.setText('N/A')
             self.axmag_lab_2.setText('N/A')
@@ -672,42 +685,57 @@ class Ui_MainWindow(object):
             self.mag_lab_2.setText('N/A')
             self.axmag_lab_2.setText('N/A')
         else:
-            self.system.calculate_system_specs()
-            self.FoV_lab_2.setText(str(round(self.system.FoV*1e6,2)))
-            self.mag_lab_2.setText(str(round(self.system.mag,2)))
-            self.axmag_lab_2.setText(str(round(self.system.axial_mag,2)))
+            self.worker.scope.calculate_system_specs()
+            self.FoV_lab_2.setText(str(round(self.worker.scope.FoV*1e6,2)))
+            self.mag_lab_2.setText(str(round(self.worker.scope.mag,2)))
+            self.axmag_lab_2.setText(str(round(self.worker.scope.axial_mag,2)))
 
 
         try:
-            RI = self.system.lenses[0].RI
-            length = 1e6*self.system.lam_ex/(RI*(1-np.cos(self.system.ls_opening)))
+            RI = self.worker.scope.lenses[0].RI
+            length = 1e6*self.worker.scope.lam_ex/(RI*(1-np.cos(self.worker.scope.ls_opening)))
             self.ls_thic_lab_2.setText(str(round(length,1)))
         except:
             self.ls_thic_lab_2.setText('N/A')
 
+    def tracing(self):
+        self.thread = QtCore.QThread()
+        self.worker.moveToThread(self.thread)
+        self.thread.started.connect(self.worker.run)
+        self.worker.finished.connect(self.thread.quit)
+        self.worker.finished.connect(self.worker.deleteLater)
+        self.thread.finished.connect(self.thread.deleteLater)
+        # Step 6: Start the thread
+        self.thread.start()
+
+        self.TraceSystem.setEnabled(False)
+        self.thread.finished.connect(
+            lambda: self.TraceSystem.setText('Done!')
+        )
+
     def trace(self):
         try:
-            self.system.ensamble = int(self.ensamble_lineEdit.text())
+            self.worker.scope.ensamble = int(self.ensamble_lineEdit.text())
         except:
             self.critError('ensamble size')
             return
 
         try:
-            self.system.lam_em = float(self.em_lineEdit.text())*1e-9
+            self.worker.scope.lam_em = float(self.em_lineEdit.text())*1e-9
         except:
             self.critError('emission wavelength')
             return
 
         try:
-            self.system.SNR = np.sqrt(int(self.photons_lineEdit.text()))
+            self.worker.scope.SNR = np.sqrt(int(self.photons_lineEdit.text()))
         except:
             self.critError('photon count')
             return
 
         if self.checkBox_ani.isChecked():
-            self.system.anisotropy = 0.4
+            self.worker.scope.anisotropy = 0.4
         else:
-            self.system.anisotropy = 0
+            self.worker.scope.anisotropy = 0
 
         try:
             saveloc = self.savename_lineEdit.text()
@@ -720,9 +748,10 @@ class Ui_MainWindow(object):
 
         self.TraceSystem.setText('Working')
 
-        self.system.calculate_PSF(self)
+        # self.worker.scope.calculate_PSF(self)
+        self.tracing()
 
-        self.TraceSystem.setText('Done!')
+        # self.TraceSystem.setText('Done!')
 
     def helpLens(self,param):
         msg = QtWidgets.QMessageBox()
