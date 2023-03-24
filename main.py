@@ -502,6 +502,7 @@ class Ui_MainWindow(object):
         self.Helppos.setText(_translate("MainWindow", "Help"))
 
         self.AddLens.setText(_translate("MainWindow", "Add Lens"))
+        self.AddLens.setShortcut(QtCore.QCoreApplication.translate("MainWindow", u"Return"))
 
         ########################################################################
         #Camera tab
@@ -530,6 +531,8 @@ class Ui_MainWindow(object):
         self.FoV_lab_2.setText(_translate("MainWindow", "N/A"))
 
         self.AddCamera.setText(_translate("MainWindow", "Update"))
+        self.AddCamera.setShortcut(QtCore.QCoreApplication.translate("MainWindow", u"Return"))
+
 
         ########################################################################
         #Light-sheet tab
@@ -550,8 +553,8 @@ class Ui_MainWindow(object):
         self.ls_thic_lab_2.setText(_translate("MainWindow", "N/A"))
 
         self.makeLS.setText(_translate("MainWindow", "Update"))
-
-
+        self.makeLS.setShortcut(QtCore.QCoreApplication.translate("MainWindow", u"Return"))
+        
         ########################################################################
         #Tracing tab
 
@@ -580,6 +583,8 @@ class Ui_MainWindow(object):
         self.savename_lineEdit.setText('tmp')
 
         self.TraceSystem.setText(_translate("MainWindow", "Trace"))
+        self.TraceSystem.setShortcut(QtCore.QCoreApplication.translate("MainWindow", u"Return"))
+
 
     def initPlot(self,MainWindow):
         self.figure = PlotCanvas(self.worker.scope, MainWindow, width=self.width//100, height=self.height//200)
