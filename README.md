@@ -14,12 +14,12 @@ The software is written to simulate and analyze light-sheet imaging systems whil
 
 * Python 3.9.6 or above
 * Python packages
-	- Numpy 1.12.3
-	- Numba 0.53.1
-	- Matplotlib 3.5.2
-	- PyQt5 5.15.4
-	- Tifffile 2021.8.8
-	- Scipy 1.7.1
+	- matplotlib==3.5.2
+	- numba==0.53.1
+	- numpy==1.21.3
+	- PyQt5==5.15.9
+	- scipy==1.7.1
+	- tifffile==2021.8.8
 
 # How to use
 
