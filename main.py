@@ -744,6 +744,7 @@ class Ui_MainWindow(object):
 
         try:
             saveloc = self.savename_lineEdit.text()
+            self.worker.scope.path = saveloc
         except:
             self.critError('Save name')
             return
