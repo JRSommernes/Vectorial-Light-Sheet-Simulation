@@ -3,7 +3,7 @@ from matplotlib.figure import Figure
 from PyQt5 import QtCore, QtWidgets
 from microscope import Microscope
 import numpy as np
-import sys, os
+import sys, os, json
 
 os.environ["QT_AUTO_SCREEN_SCALE_FACTOR"] = "1"
 
