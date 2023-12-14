@@ -196,7 +196,7 @@ def collected_field(pol,theta_max):
     return total_used_field/total_field
 
 def loadbar(counter,len):
-    #Its just a loadbar
+    #It's just a loadbar
     counter +=1
     done = (counter*100)//len
     sys.stdout.write('\r')
@@ -418,6 +418,37 @@ def Fresnel(th_i,th_f,RI_i,RI_f):
     return np.array(((Tp, zero, zero),
                      (zero, Ts, zero),
                      (zero, zero, one))).transpose(2,3,0,1)
+
+def lens_transmission(th,poly):
+    """Making the lens transmission matrix
+
+    Parameters
+    ----------
+    th : floating point array
+        Angle of incidence
+    poly : floating point array
+        Polynomial fit of the lens transmission
+
+    Returns
+    -------
+        floating point array
+            Complete lens transmission matrix
+    """    
+    zero = np.zeros_like(th)
+    one = np.ones_like(th)
+    if poly.ndim == 1:
+        val = np.polyval(poly,th)
+        return np.array(((val,  zero, zero),
+                         (zero, val,  zero),
+                         (zero, zero, one))).transpose(2,3,0,1)
+    elif poly.ndim == 2:
+        p_val = np.polyval(poly[0],th)
+        s_val = np.polyval(poly[1],th)
+        return np.array(((p_val, zero,  zero),
+                         (zero,  s_val, zero),
+                         (zero,  zero,  one))).transpose(2,3,0,1)
+    else:
+        raise ValueError('Polynomial array must be 1D or 2D')
 
 def L_refraction(theta):
     """Making the ray refraction matrix for the meridional plane

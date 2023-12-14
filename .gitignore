@@ -1,0 +1,16 @@
+Light_transmission/Full_transmission.npy
+Light_transmission/Glass_O3_measured_transmission.npy
+Light_transmission/Glass_O3.npy
+Light_transmission/light_transmission.py
+Light_transmission/measured_O2-O3_transmission.npy
+Light_transmission/optical_efficiency.png
+Light_transmission/simulated_O2-O3_transmission.npy
+Light_transmission/Water_O3_coverslip.npy
+Light_transmission/Water_O3.npy
+__pycache__/microscope.cpython-39.pyc
+__pycache__/other_functions.cpython-39.pyc
+__pycache__/other_functions.cpython-311.pyc
+__pycache__/microscope.cpython-39.pyc
+__pycache__/other_functions.cpython-39.pyc
+__pycache__/microscope.cpython-39.pyc
+__pycache__/other_functions.cpython-39.pyc

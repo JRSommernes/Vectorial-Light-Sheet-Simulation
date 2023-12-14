@@ -10,22 +10,29 @@ import os
 #alter the code in the functions "make_system" and "run_simulation".
 ################################################################################
 
-def make_system(path):
+def make_system(path,ex,em,alpha,O3='Glass'):
     """Creates the system and adds the optical path.
 
     Parameters
     ----------
-    path : string
+    path : String
         Determines the save location of the simulation files
+    ex : Float
+        Excitation wavelength
+    em : Float
+        Emission wavelength
+    alpha : Float
+        Rotation of the sample plane
+    O3 : String
+        Immersion medium ['Glass', 'Water', or 'Air']
 
     Returns
     -------
     Class
         microscope class
     """
-    ex = 488e-9 #Excitation wavelength
-    em = 507e-9 #Emission wavelength
-    system = Microscope(ex,em,path) #Creates microscope
+    #Creates microscope class
+    system = Microscope(ex,em,path) 
 
     #Lens 1
     NA_1 = 1.35
@@ -38,24 +45,33 @@ def make_system(path):
 
     #Lens 4
     NA_4 = 0.95
-    rot_4 = 20*np.pi/180
-    system.add_lens(NA_4,rot=rot_4)
+    rot_4 = alpha
+    # rot_4 = 0
+    throughput_4 = np.array([[2.21057481e-24,1.73931774e-11,-8.22755585e-21,-1.88712388e-06,3.83174080e-18,9.79322936e-01],[1.45298466e-24,-1.73285965e-10,-6.69094419e-21,-5.33563605e-05,6.53859519e-18,9.91885292e-01]])
+    system.add_lens(NA_4,rot=rot_4,thr=throughput_4)
 
     #Lens 3
     NA_3 = NA_2*(RI_1*NA_4)/(NA_1)
     system.add_lens(NA_3,pos=2)
 
     #Lens 5
-    NA_5 = 1
-    RI_5 = 1.7
-    system.add_lens(NA_5,RI_5)
+    if O3 == 'Glass':
+        NA_5 = 1
+        RI_5 = 1.7
+        throughput_5 = np.array([5.42858373e-29,-1.52269005e-12,-1.34761517e-25,1.60371526e-09,-1.35290597e-21,-3.77445778e-06,2.83736542e-18,9.88848755e-01])
+    elif O3 == 'Water':
+        NA_5 = 1
+        RI_5 = 1.33
+        throughput_5 = None
+    elif O3 == 'Air':
+        NA_5 = 0.5
+        RI_5 = 1
+        throughput_5 = None
+    system.add_lens(NA_5,RI_5,thr=throughput_5)
 
     #Lens 6
     NA_6 = NA_5/40
     system.add_lens(NA_6)
-
-    #Camera
-    system.add_camera(128,2e-6,100,1.4) #Defines camera config
     
     return system
 
@@ -63,18 +79,37 @@ def run_simulation():
     """Determines the parameters of the system and runs the simulation.
     """
     
-    path = 'test'
-    system = make_system(path) #Adds lenses to the system
+    path = 'lens_throughput'
+    excitation = 488e-9 #Excitation wavelength
+    emission = 507e-9 #Emission wavelength
+    alpha = 30*np.pi/180 #Rotation of the sample plane
+    O3 = 'Glass' #Immersion medium ['Glass', 'Water', or 'Air']
+
+    #Adds lenses to the system
+    system = make_system(path,excitation,emission,alpha,O3) 
+
+    res = 128 #Camera resolution
+    vox = 2e-6 #Camera voxel size
+    bias_offset = 100 #Camera bias offset
+    RMS = 1.4 #Camera readout noise
+
+    #Defines camera configuration
+    system.add_camera(res,vox,bias_offset,RMS) 
 
     system.ensamble = 10 #Number of dipoles in ensamble
     system.OTF_res = 256 #Size of OTF in pixels
-    system.ls_pol = 'u' #Ls polarization ['p', 's', or 'u']
+    system.ls_pol = 'p' #Ls polarization ['p', 's', or 'u']
     system.anisotropy = 0.4 #Anisotropy [0, or 0.4]
-    system.ls_opening = 5*np.pi/180 #Ls opening half-angle in degrees
-    system.SNR = 20 #Signal to noise ratio
+    system.ls_opening = 15*np.pi/180 #Ls opening half-angle in degrees
+    system.SNR = 100 #Signal to noise ratio for poisson noise
 
+    #Runs the simulation
     system.calculate_system_specs()
     system.calculate_PSF()
+    #Calculates the MTF and analyzes is
+    system.make_MTF()
+    system.save_stacks()
+    system.save_data()
 
 ################################################################################
 #The simulation code starts below. Alter at your own risk.
@@ -84,7 +119,7 @@ class Lens:
     """ Class containing lens parameters. Also contains
         functions for focusing and collimating a beam.
     """
-    def __init__(self,NA,RI,rot):
+    def __init__(self,NA,RI,rot,thr):
         """Initialization of the lens class
 
         Parameters
@@ -99,6 +134,7 @@ class Lens:
         self.NA = NA    #Numerical aperture
         self.RI = RI    #Refractive index
         self.rot = rot  #Rotation of lens
+        self.thr = thr  #Light throughput of lens
 
     def collimating(self,theta,phi,dir):
         """Function for transform matrix
@@ -119,6 +155,12 @@ class Lens:
         self.theta = theta
         self.phi = phi
         transform.append(L_refraction(dir*theta))
+
+        #If the lens has a predetermined light throughout, use that
+        if self.thr is not None:
+            transform.append(R_y(dir*theta))
+            transform.append(lens_transmission(theta,self.thr))
+            transform.append(R_y(-1*dir*theta))
 
         #Rotation of the optical axis
         if self.rot != 0:
@@ -141,7 +183,7 @@ class Lens:
         self.transform = multidot(np.array(transform))
         self.apodization = 1/(np.sqrt(np.cos(self.theta)/self.RI))
     
-    def focusing(self,theta,phi,RI_next,dir):
+    def focusing(self,theta,phi,RI_next,thr_next,dir):
         """Function for transform matrix
            corresponding to a focusing lens.
 
@@ -163,12 +205,19 @@ class Lens:
         self.theta_next = theta
         self.phi_next = phi
 
+        #If the lens has a predetermined light throughout, use that
+        if self.thr is not None:
+            transform.append(R_y(-1*dir*theta))
+            transform.append(lens_transmission(theta,self.thr))
+            transform.append(R_y(dir*theta))
+        
         #Transmission through a refractive index change
         if RI_next != self.RI:
             theta = np.arcsin(RI_next*np.sin(theta)/self.RI)
             phi = phi
             transform.append(R_y(-1*dir*self.theta_next))
-            transform.append(Fresnel(theta,self.theta_next,self.RI,RI_next))
+            if thr_next is None:
+                transform.append(Fresnel(theta,self.theta_next,self.RI,RI_next))
             transform.append(R_y(dir*theta))
       
         #Rotation of the optical axis
@@ -195,7 +244,6 @@ class Lens:
         #Effective lens matrix and apodization
         self.transform = multidot(np.array(transform))
         self.apodization = np.sqrt(np.cos(self.theta)/self.RI)
-
 
 class Camera:
     """Class containin camera parameters
@@ -248,7 +296,7 @@ class Microscope:
         self.k0 = 2*np.pi/self.lam_em #Emission wavenumber [rad/m]
         self.path = path              #Save folder location
 
-    def add_lens(self,NA,RI=1,rot=0,pos=False):
+    def add_lens(self,NA,RI=1,rot=0,thr=None,pos=False):
         """Adds lens to the system
 
         Parameters
@@ -263,7 +311,7 @@ class Microscope:
             Position of the lens in the setup
 
         """
-        lens = Lens(NA,RI,rot)
+        lens = Lens(NA,RI,rot,thr)
         if pos == False:
             self.lenses.append(lens)
         elif not type(pos) is int:
@@ -318,6 +366,10 @@ class Microscope:
         self.axial_mag = self.mag**2*self.lenses[-1].RI/self.lenses[0].RI
         self.z_voxel_size = self.camera.vox/self.mag*self.axial_mag
         self.scaling = self.lam_em/(2*self.camera.vox*self.lenses[-1].NA)
+
+        const = self.lam_em*self.mag/(4*self.lenses[0].NA)
+        if self.camera.vox >= const:
+            print('Warning: Voxel size too large for accurate simulations')
 
         #Clculates system FoV in sample space
         if hasattr(self, 'camera'):
@@ -401,6 +453,7 @@ class Microscope:
         theta_tmp = np.arcsin((del_K/(self.k0*self.lenses[-1].RI))*RR)
         phi_tmp = np.arctan2(yy,xx)
         RI_next = self.lenses[-1].RI
+        thr_next = None
 
         #Iterates through the lenses and append the coordinate transform
         #of the lens to a list
@@ -410,7 +463,7 @@ class Microscope:
             #Determines if the lens is focusing or collimating
             dir = rotation_direction[i]
             if i%2 == 0:
-                lens.focusing(theta_tmp,phi_tmp,RI_next,dir)
+                lens.focusing(theta_tmp,phi_tmp,RI_next,thr_next,dir)
                 pupil = lens.RI*np.sin(lens.theta)/lens.NA
                 phi_tmp = lens.phi
             if i%2 == 1:
@@ -419,6 +472,7 @@ class Microscope:
                 theta_tmp = lens.theta_prev
                 phi_tmp = lens.phi_prev
                 RI_next = lens.RI
+                thr_next = lens.thr
 
             trans.append(lens.transform)
             self.apodization *= lens.apodization
@@ -461,19 +515,19 @@ class Microscope:
         if not os.path.exists(self.path):
             os.mkdir(self.path)
         with tifffile.TiffWriter(self.path+'/PSF.tiff') as stack:
-            stack.save(img16(self.PSF).transpose(2,1,0),contiguous=True)
+            stack.write(img16(self.PSF).transpose(2,1,0),contiguous=True)
         with tifffile.TiffWriter(self.path+'/PSF_effective.tiff') as stack:
-            stack.save(img16(self.eff_PSF).transpose(2,1,0),contiguous=True)
+            stack.write(img16(self.eff_PSF).transpose(2,1,0),contiguous=True)
         with tifffile.TiffWriter(self.path+'/PSF_poisson.tiff') as stack:
-            stack.save(self.PSF_poisson.transpose(2,1,0),contiguous=True)
+            stack.write(self.PSF_poisson.transpose(2,1,0),contiguous=True)
         with tifffile.TiffWriter(self.path+'/PSF_readout.tiff') as stack:
-            stack.save(self.PSF_readout.transpose(2,1,0),contiguous=True)
+            stack.write(self.PSF_readout.transpose(2,1,0),contiguous=True)
         with tifffile.TiffWriter(self.path+'/MTF_noiseless.tiff') as stack:
-            stack.save(self.MTF_noiseless.transpose(2,1,0),contiguous=True)
+            stack.write(self.MTF_noiseless.transpose(2,1,0).astype(np.float32),contiguous=True)
         with tifffile.TiffWriter(self.path+'/MTF_poisson.tiff') as stack:
-            stack.save(self.MTF_poisson.transpose(2,1,0),contiguous=True)
+            stack.write(self.MTF_poisson.transpose(2,1,0).astype(np.float32),contiguous=True)
         with tifffile.TiffWriter(self.path+'/MTF_readout.tiff') as stack:
-            stack.save(self.MTF_readout.transpose(2,1,0),contiguous=True)
+            stack.write(self.MTF_readout.transpose(2,1,0).astype(np.float32),contiguous=True)
 
     def analyze(self):
             """Automated analysis script used to extract resolution from the MTF.
@@ -482,22 +536,41 @@ class Microscope:
             #Define the half length of the MTF
             N = len(self.MTF_poisson)//2
             #Subtracts the square root of the DC term from the poisson MTF
-            #to fond the noise floor of the Fourier transform
+            #to find the noise floor of the Fourier transform
             poisson = self.MTF_poisson-np.sqrt(self.MTF_poisson.max())
+            poisson[poisson<0] = 0
 
-            xx = poisson[N,N:,N]
-            X_cut = np.where(xx<=0)[0][0]
-            X_res = 1/(self.base_freq*X_cut/1e9)
+            #Evil statistical magic to find the predicted noise floor of the readout MTF
+            readout_noise = np.sqrt(self.MTF_readout.max()-self.camera.offset*(2*N)**3+self.camera.RMS**2*(2*N)**3)
+            readout = self.MTF_readout-readout_noise
+            readout[readout<0] = 0
 
-            yy = poisson[N:,N,N]
-            Y_cut = np.where(yy<=0)[0][0]
-            Y_res = 1/(self.base_freq*Y_cut/1e9)
+            xp = poisson[N,N:,N]
+            XP_cut = np.where(xp<=0)[0][0]
+            XP_res = 1/(self.base_freq*XP_cut/1e9)
 
-            zz = poisson[N,N,N:]
-            Z_cut = np.where(zz<=0)[0][0]
-            Z_res = 1/(self.base_freq*Z_cut/1e9)
+            yp = poisson[N:,N,N]
+            YP_cut = np.where(yp<=0)[0][0]
+            YP_res = 1/(self.base_freq*YP_cut/1e9)
 
-            self.XYZ_res = np.array([X_res,Y_res,Z_res])
+            zp = poisson[N,N,N:]
+            ZP_cut = np.where(zp<=0)[0][0]
+            ZP_res = 1/(self.base_freq*ZP_cut/1e9)
+
+            xr = readout[N,N:,N]
+            XR_cut = np.where(xr<=0)[0][0]
+            XR_res = 1/(self.base_freq*XR_cut/1e9)
+
+            yr = readout[N:,N,N]
+            YR_cut = np.where(yr<=0)[0][0]
+            YR_res = 1/(self.base_freq*YR_cut/1e9)
+
+            zr = readout[N,N,N:]
+            ZR_cut = np.where(zr<=0)[0][0]
+            ZR_res = 1/(self.base_freq*ZR_cut/1e9)
+
+            self.XYZ_res_poisson = np.array([XP_res,YP_res,ZP_res])
+            self.XYZ_res_readout = np.array([XR_res,YR_res,ZR_res])
 
     def FWHM_measurement(self):
         """Script to find the FWHM of the PSF
@@ -524,14 +597,21 @@ class Microscope:
         self.FWHM = np.array((x_sigma,y_sigma,z_sigma))*2*np.sqrt(2*np.log(2))
 
     def save_data(self):
+        if not os.path.exists(self.path):
+            os.mkdir(self.path)
         readout_SNR = self.SNR**2/np.sqrt(self.SNR**2+self.camera.RMS**2)
 
-        data = {'Dipoles in ensamble' : self.ensamble,
+        data = {'Anisotrpy' : self.anisotropy,
+                'Dipoles in ensamble' : self.ensamble,
                 'Emission wavelength [nm]' : np.round(self.lam_em*1e9,2),
                 'Excitation wavelength [nm]' : np.round(self.lam_ex*1e9,2),
                 'Full FoV [pixels]' : self.camera.res,
                 'Full FoV in object space [microns]' : self.FoV*1e6,
+                'Lens NA\'s' : [lens.NA for lens in self.lenses],
+                'Lens immersion RI\'s' : [lens.RI for lens in self.lenses],
+                'Light sheet angle [degrees]' : 90-np.round(self.alpha*180/np.pi,1),
                 'Light sheet opening [degrees]' : np.round(self.ls_opening*180/np.pi),
+                'Light sheet polarization' : self.ls_pol,
                 'Magnification transverse' : self.mag,
                 'Magnification axial' : self.axial_mag,
                 'MTF base frequency' : self.base_freq,
@@ -543,9 +623,12 @@ class Microscope:
     
         try:
             self.analyze()
-            res = {'X_res [nm]' : self.XYZ_res[0],
-                   'Y_res [nm]' : self.XYZ_res[1],
-                   'Z_res [nm]' : self.XYZ_res[2]}
+            res = {'X_res_poisson [nm]' : self.XYZ_res_poisson[0],
+                   'Y_res_poisson [nm]' : self.XYZ_res_poisson[1],
+                   'Z_res_poisson [nm]' : self.XYZ_res_poisson[2],
+                   'X_res_readout [nm]' : self.XYZ_res_readout[0],
+                   'Y_res_readout [nm]' : self.XYZ_res_readout[1],
+                   'Z_res_readout [nm]' : self.XYZ_res_readout[2]}
             data = data|res
         except:
             print('Auto analyze failed')
@@ -561,6 +644,8 @@ class Microscope:
 
         with open(self.path+'/data.json', 'w') as output:
             json.dump(data, output, indent=4)
+
+        self.data = data
 
     def calculate_PSF(self,pbar=None):
         """Main function that creates the system PSF and MTF
@@ -633,12 +718,22 @@ class Microscope:
             ani.append(collected_field(pol,np.nanmax(self.lenses[0].theta))*Ae)
 
             #Calculates the initial and final field
-            Ei = E_0(pol, self.lenses[0].phi, self.lenses[0].theta,Ae)
+            Ei = E_0(pol, self.lenses[0].phi, self.lenses[0].theta, Ae)
             Ef = np.nan_to_num(self.apodization.reshape(res,res,1)*np.einsum('abji,abi->abj', self.transform, Ei))
+            
+
+            #Finds the electric field in the pupil of O2 and O3
+            P2 = multidot(np.array([self.lenses[2].transform,self.lenses[1].transform,
+                                                   self.lenses[0].transform,R_z(self.lenses[0].phi)]))
+            P3 = multidot(np.array([np.linalg.inv(self.lenses[-1].transform),
+                                                   R_z(self.lenses[-1].phi),
+                                                   self.transform]))
+            E_z_1 = np.nan_to_num(np.einsum('abji,abi->abj', P2, Ei))
+            E_z_2 = np.nan_to_num(np.einsum('abji,abi->abj', P3, Ei))
 
             #Calculates the total transmitted field intensity
-            initial_intensity = np.sum(np.abs(np.nan_to_num(Ei))**2)
-            final_intensity = np.sum(np.abs(np.nan_to_num(Ef))**2)
+            initial_intensity = np.sum(np.abs(E_z_1)**2)
+            final_intensity = np.sum(np.abs(E_z_2)**2)
             tti.append(final_intensity/initial_intensity)
 
             #Calculates the PSF based on the final field
@@ -650,11 +745,6 @@ class Microscope:
         #Calculates the optical eficciency of the system configuration
         throughput = np.array(ani)*np.array(tti)
         self.tti = np.mean(throughput)
-
-        #Calculates the MTF and analyzes is
-        self.make_MTF()
-        self.save_stacks()
-        self.save_data()
 
 ##############################################################
 #This function is executed if the current file is run directly
